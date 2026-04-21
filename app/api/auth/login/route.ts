@@ -12,15 +12,16 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = await createClient()
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? request.nextUrl.origin
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: `${request.nextUrl.origin}/api/auth/confirm`,
+      emailRedirectTo: `${siteUrl}/api/auth/confirm`,
     },
   })
 
   if (error) {
-    console.error('Magic link error:', error.message)
+    console.error('Magic link error:', error.message, '| code:', error.code ?? 'none', '| redirect:', `${siteUrl}/api/auth/confirm`)
     return NextResponse.redirect(new URL('/login?error=send', request.url))
   }
 
