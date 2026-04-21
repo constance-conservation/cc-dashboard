@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
   })
 
   if (error) {
-    console.error('Magic link error:', error.message, '| code:', error.code ?? 'none', '| redirect:', `${siteUrl}/api/auth/confirm`)
+    console.error('Magic link error full:', JSON.stringify({ message: error.message, code: (error as { code?: string }).code, status: (error as { status?: number }).status, redirect: `${siteUrl}/api/auth/confirm` }))
     return NextResponse.redirect(new URL('/login?error=send', request.url))
   }
 
