@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = await createClient()
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? request.nextUrl.origin
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? request.nextUrl.origin).replace(/\/$/, '')
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
@@ -21,8 +21,10 @@ export async function POST(request: NextRequest) {
   })
 
   if (error) {
-    console.error('Magic link error full:', JSON.stringify({ message: error.message, code: (error as { code?: string }).code, status: (error as { status?: number }).status, redirect: `${siteUrl}/api/auth/confirm` }))
-    return NextResponse.redirect(new URL('/login?error=send', request.url))
+    const code = (error as { code?: string }).code ?? 'unknown'
+    const msg = encodeURIComponent(error.message ?? 'unknown')
+    console.error('Magic link error full:', JSON.stringify({ message: error.message, code, status: (error as { status?: number }).status, redirect: `${siteUrl}/api/auth/confirm` }))
+    return NextResponse.redirect(new URL(`/login?error=send&code=${code}&msg=${msg}`, request.url))
   }
 
   return NextResponse.redirect(new URL('/login?sent=1', request.url))
