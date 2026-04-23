@@ -11,7 +11,7 @@ const APPS = [
   { id: 'projects', href: '/projects', name: 'Projects', icon: 'projects' as const, desc: 'Live project list, capacity & budget' },
   { id: 'employees', href: '/employees', name: 'Employees', icon: 'employees' as const, desc: 'Team details, skills & availability' },
   { id: 'tender', href: '/tendering', name: 'Tendering', icon: 'tender' as const, desc: 'Live bids, proposals & submissions' },
-  { id: 'staff', href: '/reporting', name: 'Staff Reporting', icon: 'staff' as const, desc: 'Daily reports, timesheets & incident logs' },
+  { id: 'staff', href: 'https://constance-reporting.vercel.app/', name: 'Staff Reporting', icon: 'staff' as const, desc: 'Daily reports, timesheets & incident logs' },
   { id: 'finance', href: '/finances', name: 'Finances', icon: 'finance' as const, desc: 'P&L, invoicing, cash position' },
   { id: 'fleet', href: '/fleet', name: 'Fleet & Equipment', icon: 'fleet' as const, desc: 'Vehicles, servicing & live locations' },
 ]
@@ -86,7 +86,7 @@ function AppGridCards({ stats }: { stats: AppStats }) {
       {APPS.map(app => {
         const s = stats[app.id] || {}
         return (
-          <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }}>
+          <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
             <div className="app-card">
               <div className="app-card-top">
                 <div className="app-icon"><Icon name={app.icon} /></div>
@@ -112,7 +112,7 @@ function AppListRows({ stats }: { stats: AppStats }) {
       {APPS.map(app => {
         const s = stats[app.id] || {}
         return (
-          <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }}>
+          <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
             <div className="app-row">
               <div className="app-icon"><Icon name={app.icon} size={18} /></div>
               <div>
@@ -138,7 +138,7 @@ function AppCompactGrid() {
   return (
     <div className="app-compact-grid">
       {APPS.map(app => (
-        <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }}>
+        <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
           <div className="app-compact">
             <div className="app-icon"><Icon name={app.icon} size={16} /></div>
             <div className="name">{app.name}</div>
