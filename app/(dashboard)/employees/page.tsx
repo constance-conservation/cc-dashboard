@@ -5,7 +5,15 @@ import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer, Field } from '@/components/dashboard/Drawer'
+import { Select } from '@/components/dashboard/Select'
 import type { Employee } from '@/lib/types'
+
+const EMPLOYMENT_TYPES = [
+  { value: 'full-time', label: 'Full-time' },
+  { value: 'part-time', label: 'Part-time' },
+  { value: 'casual', label: 'Casual' },
+  { value: 'contractor', label: 'Contractor' },
+]
 
 function SkillsEditor({ selected, allSkills, onChange, onAddSkill }: { selected: string[]; allSkills: string[]; onChange: (s: string[]) => void; onAddSkill: (s: string) => void }) {
   const [newSkill, setNewSkill] = useState('')
@@ -115,19 +123,12 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Name"><input className="input" value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></Field>
         <Field label="Role">
-          <select className="select" value={edit.role} onChange={e => setEdit({ ...edit, role: e.target.value })}>
-            {state.roles.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
+          <Select value={edit.role} onChange={v => setEdit({ ...edit, role: v })} options={state.roles.map(r => ({ value: r, label: r }))} />
         </Field>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Employment type">
-          <select className="select" value={edit.type} onChange={e => setEdit({ ...edit, type: e.target.value as Employee['type'] })}>
-            <option value="full-time">Full-time</option>
-            <option value="part-time">Part-time</option>
-            <option value="casual">Casual</option>
-            <option value="contractor">Contractor</option>
-          </select>
+          <Select value={edit.type} onChange={v => setEdit({ ...edit, type: v as Employee['type'] })} options={EMPLOYMENT_TYPES} />
         </Field>
         <Field label="Pay rate (AUD/hr)"><input className="input" type="number" value={edit.payRate} onChange={e => setEdit({ ...edit, payRate: +e.target.value })} /></Field>
       </div>
@@ -161,17 +162,10 @@ function AddEmployeeModal({ state, onClose }: { state: ReturnType<typeof useCCSt
       <Field label="Name"><input className="input" value={e.name} onChange={ev => setE({ ...e, name: ev.target.value })} autoFocus /></Field>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Role">
-          <select className="select" value={e.role} onChange={ev => setE({ ...e, role: ev.target.value })}>
-            {state.roles.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
+          <Select value={e.role} onChange={v => setE({ ...e, role: v })} options={state.roles.map(r => ({ value: r, label: r }))} />
         </Field>
         <Field label="Type">
-          <select className="select" value={e.type} onChange={ev => setE({ ...e, type: ev.target.value as Employee['type'] })}>
-            <option value="full-time">Full-time</option>
-            <option value="part-time">Part-time</option>
-            <option value="casual">Casual</option>
-            <option value="contractor">Contractor</option>
-          </select>
+          <Select value={e.type} onChange={v => setE({ ...e, type: v as Employee['type'] })} options={EMPLOYMENT_TYPES} />
         </Field>
       </div>
       <Field label="Pay rate (AUD/hr)"><input className="input" type="number" value={e.payRate} onChange={ev => setE({ ...e, payRate: +ev.target.value })} /></Field>

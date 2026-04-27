@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer } from '@/components/dashboard/Drawer'
+import { Select } from '@/components/dashboard/Select'
 import type { RosterAssignment, Project, Employee } from '@/lib/types'
 
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
@@ -180,9 +181,7 @@ function DayEditor({ day, ym, state, onClose }: { day: number; ym: string; state
                 <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{emp.role}</div>
               </div>
-              <select className="select" value={a.projectId} onChange={e => changeProject(a.employeeId, e.target.value)} style={{ fontSize: 12, maxWidth: 180 }}>
-                {activeProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+              <Select value={a.projectId} onChange={v => changeProject(a.employeeId, v)} options={activeProjects.map(p => ({ value: p.id, label: p.name }))} style={{ fontSize: 12, maxWidth: 180 }} />
               {canOT && (
                 <input className="input" placeholder="OT hrs" type="number" value={a.overtimeHours || ''} onChange={e => toggleOvertime(a.employeeId, Number(e.target.value) || 0)} style={{ width: 70, fontSize: 12 }} />
               )}
@@ -201,10 +200,7 @@ function DayEditor({ day, ym, state, onClose }: { day: number; ym: string; state
               <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{emp.role} · {emp.skills.slice(0, 2).join(', ')}</div>
             </div>
-            <select className="select" onChange={e => { if (e.target.value) addTo(emp.id, e.target.value) }} defaultValue="" style={{ fontSize: 12, maxWidth: 200 }}>
-              <option value="">+ Add to project…</option>
-              {activeProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            <Select value="" placeholder="+ Add to project…" onChange={v => { if (v) addTo(emp.id, v) }} options={activeProjects.map(p => ({ value: p.id, label: p.name }))} style={{ fontSize: 12, maxWidth: 200 }} />
           </div>
         ))}
         {unassignedAvailable.length === 0 && <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>All available staff are assigned.</div>}

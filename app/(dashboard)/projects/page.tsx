@@ -5,8 +5,19 @@ import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer, Field } from '@/components/dashboard/Drawer'
+import { Select } from '@/components/dashboard/Select'
 import { createClient } from '@/lib/supabase/client'
 import type { Project } from '@/lib/types'
+
+const PRIORITY_OPTIONS = [
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'low', label: 'Low' },
+]
+const UNIT_OPTIONS = [
+  { value: 'days', label: 'Days' },
+  { value: 'hours', label: 'Hours' },
+]
 
 function CapacityMeter({ label, pct, caption }: { label: string; pct: number; caption: string }) {
   const color = pct > 90 ? 'var(--danger)' : pct > 75 ? 'var(--warn)' : 'var(--accent)'
@@ -107,14 +118,10 @@ function ProjectDrawer({ projectId, state, onClose }: { projectId: string; state
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Work unit">
-          <select className="select" value={edit.unit} onChange={e => setEdit({ ...edit, unit: e.target.value as 'days' | 'hours' })}>
-            <option value="days">Days</option><option value="hours">Hours</option>
-          </select>
+          <Select value={edit.unit} onChange={v => setEdit({ ...edit, unit: v as 'days' | 'hours' })} options={UNIT_OPTIONS} />
         </Field>
         <Field label="Priority">
-          <select className="select" value={edit.priority} onChange={e => setEdit({ ...edit, priority: e.target.value as Project['priority'] })}>
-            <option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option>
-          </select>
+          <Select value={edit.priority} onChange={v => setEdit({ ...edit, priority: v as Project['priority'] })} options={PRIORITY_OPTIONS} />
         </Field>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -262,17 +269,10 @@ function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCSta
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Priority">
-          <select className="select" value={p.priority} onChange={e => setP({ ...p, priority: e.target.value as Project['priority'] })}>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
+          <Select value={p.priority} onChange={v => setP({ ...p, priority: v as Project['priority'] })} options={PRIORITY_OPTIONS} />
         </Field>
         <Field label="Work unit">
-          <select className="select" value={p.unit} onChange={e => setP({ ...p, unit: e.target.value as 'days' | 'hours' })}>
-            <option value="days">Days</option>
-            <option value="hours">Hours</option>
-          </select>
+          <Select value={p.unit} onChange={v => setP({ ...p, unit: v as 'days' | 'hours' })} options={UNIT_OPTIONS} />
         </Field>
       </div>
 
