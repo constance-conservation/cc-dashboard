@@ -80,26 +80,27 @@ function contractPatch(p: Partial<Project>): Record<string, unknown> {
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type CCActions = {
-  updateProject:  (id: string, patch: Partial<Project>) => void
-  addProject:     (p: Omit<Project, 'id'>) => void
-  deleteProject:  (id: string) => void
-  updateEmployee: (id: string, patch: Partial<Employee>) => void
-  addEmployee:    (e: Omit<Employee, 'id'>) => void
-  deleteEmployee: (id: string) => void
-  addSkill:       (skill: string) => void
-  removeSkill:    (skill: string) => void
-  renameSkill:    (oldName: string, newName: string) => void
-  addRole:        (role: string) => void
-  removeRole:     (role: string) => void
-  renameRole:     (oldName: string, newName: string) => void
-  addTask:        (text: string) => void
-  toggleTask:     (id: string) => void
-  deleteTask:     (id: string) => void
-  setRoster:      (roster: Roster) => void
-  updateDay:      (dateKey: string, assignments: RosterAssignment[]) => void
-  setRosterMonth: (ym: string) => void
-  resetAll:       () => void
-  loading:        boolean
+  updateProject:   (id: string, patch: Partial<Project>) => void
+  addProject:      (p: Omit<Project, 'id'>) => void
+  deleteProject:   (id: string) => void
+  updateEmployee:  (id: string, patch: Partial<Employee>) => void
+  addEmployee:     (e: Omit<Employee, 'id'>) => void
+  deleteEmployee:  (id: string) => void
+  addSkill:        (skill: string) => void
+  removeSkill:     (skill: string) => void
+  renameSkill:     (oldName: string, newName: string) => void
+  addRole:         (role: string) => void
+  removeRole:      (role: string) => void
+  renameRole:      (oldName: string, newName: string) => void
+  addTask:         (text: string) => void
+  toggleTask:      (id: string) => void
+  deleteTask:      (id: string) => void
+  setRoster:       (roster: Roster) => void
+  updateDay:       (dateKey: string, assignments: RosterAssignment[]) => void
+  setRosterMonth:  (ym: string) => void
+  resetAll:        () => void
+  loading:         boolean
+  currentUserName: string | null
 }
 
 type CCContext = CCState & CCActions
@@ -119,6 +120,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
   const [orgId, setOrgId] = useState('')
   const [state, setState] = useState<CCState>(EMPTY_STATE)
   const [loading, setLoading] = useState(true)
+  const [currentUserName, setCurrentUserName] = useState<string | null>(null)
 
   // stateRef is kept in sync on every render so async callbacks always have
   // access to the latest state without stale closure issues.
@@ -144,6 +146,22 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
 
       const oid = orgRow.id as string
       setOrgId(oid)
+
+      // Step 1b: resolve logged-in user's name from staff table (works once auth is active)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user?.email) {
+        const { data: userStaffRow } = await supabase
+          .from('staff')
+          .select('name')
+          .eq('organization_id', oid)
+          .ilike('email', user.email)
+          .eq('active', true)
+          .limit(1)
+          .maybeSingle()
+        if (userStaffRow) {
+          setCurrentUserName((userStaffRow as Record<string, unknown>).name as string)
+        }
+      }
 
       // Step 2: load all dashboard data in parallel
       const [
@@ -604,6 +622,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
 
     return {
       loading,
+      currentUserName: null as string | null,
       updateProject,
       addProject,
       deleteProject,
@@ -630,7 +649,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
   }, [loading])
 
   return (
-    <StateContext.Provider value={{ ...state, ...actions }}>
+    <StateContext.Provider value={{ ...state, ...actions, currentUserName }}>
       {children}
     </StateContext.Provider>
   )

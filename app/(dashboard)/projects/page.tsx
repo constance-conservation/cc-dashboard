@@ -166,13 +166,20 @@ export default function ProjectsPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [view, setView] = useState<'grid' | 'table'>('grid')
+  const [filter, setFilter] = useState('')
+
+  const visible = state.projects.filter(p =>
+    !filter ||
+    p.name.toLowerCase().includes(filter.toLowerCase()) ||
+    p.client.toLowerCase().includes(filter.toLowerCase())
+  )
 
   return (
     <div className="subpage">
       <div className="subpage-top">
         <Link href="/" className="back-btn"><Icon name="back" size={16} /> Dashboard</Link>
         <div style={{ width: 1, height: 20, background: 'var(--line)' }} />
-        <span className="sp-crumb">{state.projects.length} active projects · capacity & budget</span>
+        <span className="sp-crumb">{visible.length} of {state.projects.length} projects · capacity & budget</span>
         <div style={{ flex: 1 }} />
         <h2 className="sp-title">Projects</h2>
       </div>
@@ -185,12 +192,12 @@ export default function ProjectsPage() {
             <div className={`tab ${view === 'table' ? 'active' : ''}`} onClick={() => setView('table')}>Table</div>
           </div>
           <div style={{ flex: 1 }} />
-          <input className="input" placeholder="Search projects…" style={{ width: 240 }} />
+          <input className="input" placeholder="Search projects…" value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 240 }} />
         </div>
 
         {view === 'grid' ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
-            {state.projects.map(p => <ProjectCard key={p.id} project={p} state={state} onOpen={() => setSelected(p.id)} />)}
+            {visible.map(p => <ProjectCard key={p.id} project={p} state={state} onOpen={() => setSelected(p.id)} />)}
           </div>
         ) : (
           <table className="table">
@@ -198,7 +205,7 @@ export default function ProjectsPage() {
               <th>Project</th><th>Client</th><th>Unit</th><th>Allocation</th><th>Crew</th><th>Budget</th><th>Spent</th><th>Priority</th>
             </tr></thead>
             <tbody>
-              {state.projects.map(p => {
+              {visible.map(p => {
                 const pct = Math.round((p.spent / p.budget) * 100)
                 return (
                   <tr key={p.id} onClick={() => setSelected(p.id)} style={{ cursor: 'pointer' }}>

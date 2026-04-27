@@ -158,17 +158,34 @@ export default function DashboardPage() {
   const [layout, setLayout] = useState<Layout>('grid')
 
   const today = new Date().toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })
-  const directorName = 'Cameron Ellis'
-  const firstName = directorName.split(' ')[0]
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
-  const onShiftToday = (() => {
-    const todayKey = new Date().toISOString().slice(0, 10)
-    return state.roster[todayKey]?.length || 18
-  })()
+  const firstName = state.currentUserName?.split(' ')[0] ?? ''
+
+  const todayKey = new Date().toISOString().slice(0, 10)
+  const todayAssignments = state.roster[todayKey] ?? []
+  const onShiftToday = todayAssignments.length
+  const activeSites = new Set(todayAssignments.map(a => a.projectId)).size
+
+  const staffOnShift = Array.from(
+    todayAssignments.reduce((map, a) => {
+      if (!map.has(a.employeeId)) map.set(a.employeeId, a.projectId)
+      return map
+    }, new Map<string, string>())
+  ).map(([empId, projId]) => {
+    const emp = state.employees.find(e => e.id === empId)
+    const proj = state.projects.find(p => p.id === projId)
+    return emp ? { name: emp.name, initials: emp.name.split(' ').map(x => x[0]).join(''), role: emp.role, site: proj?.name ?? 'Unassigned' } : null
+  }).filter((x): x is NonNullable<typeof x> => x !== null)
+
+  const heroSub = onShiftToday === 0
+    ? 'No crew rostered today.'
+    : `${onShiftToday} staff across ${activeSites} site${activeSites !== 1 ? 's' : ''} today.`
 
   const stats: AppStats = {
-    roster: { statVal: onShiftToday, stat: 'on shift', badge: '3 open', badgeKind: 'alert' },
-    projects: { statVal: state.projects.length, stat: 'active', badge: '2 due wk' },
+    roster: { statVal: onShiftToday, stat: 'on shift', badge: null },
+    projects: { statVal: state.projects.length, stat: 'active', badge: null },
     employees: { statVal: state.employees.length, stat: 'team', badge: null },
     tender: { statVal: '7', stat: 'active', badge: 'Due Fri' },
     staff: { statVal: '12', stat: 'reports', badge: '2 new' },
@@ -177,7 +194,6 @@ export default function DashboardPage() {
   }
 
   const LayoutComp = layout === 'list' ? <AppListRows stats={stats} /> : layout === 'compact' ? <AppCompactGrid /> : <AppGridCards stats={stats} />
-  const layoutLabel = layout === 'grid' ? 'Card grid' : layout === 'list' ? 'Operational list' : 'Compact launcher'
 
   return (
     <>
@@ -190,12 +206,12 @@ export default function DashboardPage() {
             <span>{today}</span>
           </div>
           <h1 className="hero-title">
-            Good morning, <em>{firstName}</em>.<br />Five crews in the field today.
+            {greeting}, <em>{firstName}</em>.<br />{heroSub}
           </h1>
           <div className="hero-meta">
-            <div><span className="label">On shift today</span><span className="val">{onShiftToday} staff across 5 sites</span></div>
+            <div><span className="label">On shift today</span><span className="val">{onShiftToday > 0 ? `${onShiftToday} staff across ${activeSites} site${activeSites !== 1 ? 's' : ''}` : 'No crew rostered'}</span></div>
             <div><span className="label">Weather — Camden</span><span className="val">19° · light winds</span></div>
-            <div><span className="label">Active projects</span><span className="val">{state.projects.length} running · 2 completing this week</span></div>
+            <div><span className="label">Active projects</span><span className="val">{state.projects.length} running</span></div>
           </div>
         </div>
       </div>
@@ -273,16 +289,11 @@ export default function DashboardPage() {
               <div className="panel-title">Staff on shift — today</div>
               <Link href="/rostering" className="section-action">Full roster →</Link>
             </div>
-            {([
-              { name: 'Cameron Ellis', initials: 'CE', role: 'Lead Ecologist', site: 'Harrington Grove' },
-              { name: 'Priya Nair', initials: 'PN', role: 'Field Supervisor', site: 'Liverpool — Site B' },
-              { name: "James O'Brien", initials: 'JO', role: 'Bush Regenerator', site: 'Camden — Weed crew' },
-              { name: 'Marika Tawhai', initials: 'MT', role: 'Ecologist', site: 'Wollondilly — Survey' },
-              { name: 'Daniel Krauss', initials: 'DK', role: 'Fire / APZ Lead', site: 'AWP Reserve' },
-              { name: 'Lena Park', initials: 'LP', role: 'Native Seed Tech', site: 'Camden Nursery' },
-              { name: 'Tom Fitzgerald', initials: 'TF', role: 'Field Crew', site: 'Harrington Grove' },
-              { name: 'Amelia Chen', initials: 'AC', role: 'Field Crew', site: 'Liverpool — Site B' },
-            ] as const).map((s, i) => (
+            {staffOnShift.length === 0 ? (
+              <div style={{ padding: '20px 0', color: 'var(--ink-3)', fontSize: 13, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                No crew rostered for today
+              </div>
+            ) : staffOnShift.map((s, i) => (
               <div key={i} className="staff-row">
                 <div className="staff-avatar">{s.initials}</div>
                 <div className="staff-info">
