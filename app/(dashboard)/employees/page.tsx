@@ -6,6 +6,7 @@ import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer, Field } from '@/components/dashboard/Drawer'
 import { Select } from '@/components/dashboard/Select'
+import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import type { Employee } from '@/lib/types'
 
 const EMPLOYMENT_TYPES = [
@@ -134,12 +135,38 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
   if (!emp) return null
   const isArchived = !state.employees.find(e => e.id === employeeId)
   const [edit, setEdit] = useState<Employee>(emp)
+  const [confirm, setConfirm] = useState<'delete' | 'archive' | null>(null)
   const save = () => { state.updateEmployee(emp.id, edit); onClose() }
-  const del = () => { if (confirm(`Permanently delete ${emp.name}? This cannot be undone.`)) { state.deleteEmployee(emp.id); onClose() } }
-  const archive = () => { if (confirm(`Archive ${emp.name}? They will be removed from rostering and can be restored later.`)) { state.archiveEmployee(emp.id); onClose() } }
+  const del = () => setConfirm('delete')
+  const archive = () => setConfirm('archive')
   const restore = () => { state.unarchiveEmployee(emp.id); onClose() }
+  const handleConfirm = () => {
+    if (confirm === 'delete') { state.deleteEmployee(emp.id); onClose() }
+    if (confirm === 'archive') { state.archiveEmployee(emp.id); onClose() }
+    setConfirm(null)
+  }
   const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
   return (
+    <>
+    {confirm === 'delete' && (
+      <ConfirmDialog
+        title={`Delete ${emp.name}?`}
+        message="This is permanent and cannot be undone. All roster history referencing this employee will be retained, but the employee will no longer appear anywhere in the system."
+        confirmLabel="Delete permanently"
+        danger
+        onConfirm={handleConfirm}
+        onCancel={() => setConfirm(null)}
+      />
+    )}
+    {confirm === 'archive' && (
+      <ConfirmDialog
+        title={`Archive ${emp.name}?`}
+        message="They will be cleared from availability and removed from future rostering. You can restore them at any time from the Archived section."
+        confirmLabel="Archive"
+        onConfirm={handleConfirm}
+        onCancel={() => setConfirm(null)}
+      />
+    )}
     <Drawer
       title={emp.name}
       subtitle={isArchived ? 'Archived employee' : undefined}
@@ -180,6 +207,7 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
         <SkillsEditor selected={edit.skills} allSkills={state.skills} onChange={skills => setEdit({ ...edit, skills })} onAddSkill={state.addSkill} />
       </Field>
     </Drawer>
+    </>
   )
 }
 
