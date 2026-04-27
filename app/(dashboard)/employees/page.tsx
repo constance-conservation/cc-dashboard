@@ -157,6 +157,7 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
 function AddEmployeeModal({ state, onClose }: { state: ReturnType<typeof useCCState>; onClose: () => void }) {
   const [e, setE] = useState<Omit<Employee, 'id'>>({ name: '', role: state.roles[0] || 'Field Crew', type: 'full-time', payRate: 40, email: '', phone: '', availability: { mon: true, tue: true, wed: true, thu: true, fri: true, sat: false }, skills: [] })
   const save = () => { if (!e.name.trim()) return; state.addEmployee(e); onClose() }
+  const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
   return (
     <Drawer title="New employee" subtitle="Add to team roster" onClose={onClose} onSave={save} saveLabel="Create">
       <Field label="Name"><input className="input" value={e.name} onChange={ev => setE({ ...e, name: ev.target.value })} autoFocus /></Field>
@@ -173,6 +174,17 @@ function AddEmployeeModal({ state, onClose }: { state: ReturnType<typeof useCCSt
         <Field label="Phone"><input className="input" type="tel" placeholder="04xx xxx xxx" value={e.phone} onChange={ev => setE({ ...e, phone: ev.target.value })} /></Field>
       </div>
       <Field label="Pay rate (AUD/hr)"><input className="input" type="number" value={e.payRate} onChange={ev => setE({ ...e, payRate: +ev.target.value })} /></Field>
+      <Field label="Weekly availability">
+        <div style={{ display: 'flex', gap: 4 }}>
+          {days.map(d => (
+            <label key={d} style={{ flex: 1, height: 40, display: 'grid', placeItems: 'center', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', background: e.availability[d] ? 'var(--accent-soft)' : 'var(--bg-sunken)', color: e.availability[d] ? 'var(--accent)' : 'var(--ink-3)', border: '1px solid ' + (e.availability[d] ? 'var(--accent)' : 'var(--line)'), borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
+              <input type="checkbox" checked={e.availability[d]} onChange={ev => setE({ ...e, availability: { ...e.availability, [d]: ev.target.checked } })} style={{ display: 'none' }} />
+              {d}
+            </label>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 6 }}>Saturday only appears in the roster if at least one employee has it ticked.</div>
+      </Field>
       <Field label={`Skills (${e.skills.length})`}>
         <SkillsEditor selected={e.skills} allSkills={state.skills} onChange={skills => setE({ ...e, skills })} onAddSkill={state.addSkill} />
       </Field>
