@@ -222,8 +222,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
 
       const allStaff = (staffRows ?? []).map(r => r as Record<string, unknown>)
       setState({
-        employees:         allStaff.filter(r => r.active !== false).map(rowToEmployee),
-        archivedEmployees: allStaff.filter(r => r.active === false).map(rowToEmployee),
+        employees:         allStaff.filter(r => r.active !== false && r.deleted !== true).map(rowToEmployee),
+        archivedEmployees: allStaff.filter(r => r.active === false && r.deleted !== true).map(rowToEmployee),
         projects:     (contractRows ?? []).map(r => rowToProject(r as Record<string, unknown>)),
         skills:       (skillRows ?? []).map(r => (r as Record<string, unknown>).name as string),
         roles:        (roleRows ?? []).map(r => (r as Record<string, unknown>).name as string),
@@ -346,7 +346,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
     function updateEmployee(id: string, patch: Partial<Employee>) {
       setState(prev => ({
         ...prev,
-        employees: prev.employees.map(e => e.id === id ? { ...e, ...patch } : e),
+        employees:         prev.employees.map(e => e.id === id ? { ...e, ...patch } : e),
+        archivedEmployees: prev.archivedEmployees.map(e => e.id === id ? { ...e, ...patch } : e),
       }))
       db.from('staff')
         .update(staffPatch(patch))
@@ -390,12 +391,16 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       }))
     }
 
-    // Soft delete — sets active=false. Staff rows are referenced by inspection
-    // and chemical application tables so must never be hard-deleted.
+    // Permanent removal from the UI. Sets deleted=true + active=false in the DB.
+    // Hard deletes are blocked by FK references in reporting tables.
     function deleteEmployee(id: string) {
-      setState(prev => ({ ...prev, employees: prev.employees.filter(e => e.id !== id) }))
+      setState(prev => ({
+        ...prev,
+        employees:         prev.employees.filter(e => e.id !== id),
+        archivedEmployees: prev.archivedEmployees.filter(e => e.id !== id),
+      }))
       db.from('staff')
-        .update({ active: false })
+        .update({ active: false, deleted: true })
         .eq('id', id)
         .then(({ error }) => { if (error) console.error('deleteEmployee:', error) })
     }

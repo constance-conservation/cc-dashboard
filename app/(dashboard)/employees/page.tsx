@@ -130,14 +130,25 @@ function EmployeeCard({ emp, onOpen, onUnarchive }: {
 }
 
 function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; state: ReturnType<typeof useCCState>; onClose: () => void }) {
-  const emp = state.employees.find(e => e.id === employeeId)!
+  const emp = state.employees.find(e => e.id === employeeId) ?? state.archivedEmployees.find(e => e.id === employeeId)
+  if (!emp) return null
+  const isArchived = !state.employees.find(e => e.id === employeeId)
   const [edit, setEdit] = useState<Employee>(emp)
   const save = () => { state.updateEmployee(emp.id, edit); onClose() }
-  const del = () => { if (confirm(`Remove ${emp.name}?`)) { state.deleteEmployee(emp.id); onClose() } }
+  const del = () => { if (confirm(`Permanently delete ${emp.name}? This cannot be undone.`)) { state.deleteEmployee(emp.id); onClose() } }
   const archive = () => { if (confirm(`Archive ${emp.name}? They will be removed from rostering and can be restored later.`)) { state.archiveEmployee(emp.id); onClose() } }
+  const restore = () => { state.unarchiveEmployee(emp.id); onClose() }
   const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
   return (
-    <Drawer title={emp.name} onClose={onClose} onSave={save} onDelete={del} onArchive={archive}>
+    <Drawer
+      title={emp.name}
+      subtitle={isArchived ? 'Archived employee' : undefined}
+      onClose={onClose}
+      onSave={save}
+      onDelete={del}
+      onArchive={isArchived ? undefined : archive}
+      onRestore={isArchived ? restore : undefined}
+    >
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Name"><input className="input" value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></Field>
         <Field label="Role">
@@ -269,6 +280,7 @@ export default function EmployeesPage() {
                   <EmployeeCard
                     key={emp.id}
                     emp={emp}
+                    onOpen={() => setSelected(emp.id)}
                     onUnarchive={() => state.unarchiveEmployee(emp.id)}
                   />
                 ))}
