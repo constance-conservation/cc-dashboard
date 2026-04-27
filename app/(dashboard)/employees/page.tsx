@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer, Field } from '@/components/dashboard/Drawer'
+import { NumericInput } from '@/components/dashboard/NumericInput'
 import type { Employee } from '@/lib/types'
 
 function SkillsEditor({ selected, allSkills, onChange, onAddSkill }: { selected: string[]; allSkills: string[]; onChange: (s: string[]) => void; onAddSkill: (s: string) => void }) {
@@ -129,7 +130,7 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
             <option value="contractor">Contractor</option>
           </select>
         </Field>
-        <Field label="Pay rate (AUD/hr)"><input className="input" type="number" value={edit.payRate} onChange={e => setEdit({ ...edit, payRate: +e.target.value })} /></Field>
+        <Field label="Pay rate (AUD/hr)"><NumericInput className="input" value={edit.payRate} onChange={v => setEdit({ ...edit, payRate: v })} /></Field>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Email"><input className="input" value={edit.email} onChange={e => setEdit({ ...edit, email: e.target.value })} /></Field>
@@ -174,7 +175,7 @@ function AddEmployeeModal({ state, onClose }: { state: ReturnType<typeof useCCSt
           </select>
         </Field>
       </div>
-      <Field label="Pay rate (AUD/hr)"><input className="input" type="number" value={e.payRate} onChange={ev => setE({ ...e, payRate: +ev.target.value })} /></Field>
+      <Field label="Pay rate (AUD/hr)"><NumericInput className="input" value={e.payRate} onChange={v => setE({ ...e, payRate: v })} /></Field>
     </Drawer>
   )
 }

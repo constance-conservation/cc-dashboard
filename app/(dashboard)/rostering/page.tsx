@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer } from '@/components/dashboard/Drawer'
+import { NumericInput } from '@/components/dashboard/NumericInput'
 import type { RosterAssignment, Project, Employee } from '@/lib/types'
 
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
@@ -184,7 +185,7 @@ function DayEditor({ day, ym, state, onClose }: { day: number; ym: string; state
                 {activeProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
               {canOT && (
-                <input className="input" placeholder="OT hrs" type="number" value={a.overtimeHours || ''} onChange={e => toggleOvertime(a.employeeId, Number(e.target.value) || 0)} style={{ width: 70, fontSize: 12 }} />
+                <NumericInput className="input" placeholder="OT hrs" value={a.overtimeHours ?? 0} onChange={v => toggleOvertime(a.employeeId, v)} style={{ width: 70, fontSize: 12 }} />
               )}
               <button className="iconbtn" onClick={() => removeAssignment(a.employeeId)} style={{ color: 'var(--ink-3)' }}><Icon name="close" size={14} /></button>
             </div>

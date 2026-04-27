@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer, Field } from '@/components/dashboard/Drawer'
+import { NumericInput } from '@/components/dashboard/NumericInput'
 import type { Project } from '@/lib/types'
 
 function CapacityMeter({ label, pct, caption }: { label: string; pct: number; caption: string }) {
@@ -117,20 +118,20 @@ function ProjectDrawer({ projectId, state, onClose }: { projectId: string; state
         </Field>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <Field label={`Monthly allocation (${edit.unit})`}><input className="input" type="number" value={edit.monthlyAllocation} onChange={e => setEdit({ ...edit, monthlyAllocation: +e.target.value })} /></Field>
-        <Field label="Visits per month"><input className="input" type="number" value={edit.visitsPerMonth} onChange={e => setEdit({ ...edit, visitsPerMonth: +e.target.value })} /></Field>
+        <Field label={`Monthly allocation (${edit.unit})`}><NumericInput className="input" value={edit.monthlyAllocation} onChange={v => setEdit({ ...edit, monthlyAllocation: v })} /></Field>
+        <Field label="Visits per month"><NumericInput className="input" value={edit.visitsPerMonth} onChange={v => setEdit({ ...edit, visitsPerMonth: v })} /></Field>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <Field label="Fixed crew size"><input className="input" type="number" value={edit.crewSize} onChange={e => setEdit({ ...edit, crewSize: +e.target.value })} /></Field>
-        <Field label={`Charge-out rate (per ${edit.unit === 'hours' ? 'hr' : 'day'})`}><input className="input" type="number" value={edit.chargeOutRate} onChange={e => setEdit({ ...edit, chargeOutRate: +e.target.value })} /></Field>
+        <Field label="Fixed crew size"><NumericInput className="input" value={edit.crewSize} onChange={v => setEdit({ ...edit, crewSize: v })} /></Field>
+        <Field label={`Charge-out rate (per ${edit.unit === 'hours' ? 'hr' : 'day'})`}><NumericInput className="input" value={edit.chargeOutRate} onChange={v => setEdit({ ...edit, chargeOutRate: v })} /></Field>
       </div>
-      <Field label="Budget (AUD)"><input className="input" type="number" value={edit.budget} onChange={e => setEdit({ ...edit, budget: +e.target.value })} /></Field>
+      <Field label="Budget (AUD)"><NumericInput className="input" value={edit.budget} onChange={v => setEdit({ ...edit, budget: v })} /></Field>
       <Field label="Overtime">
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
             <input type="checkbox" checked={edit.overtimeFlag} onChange={e => setEdit({ ...edit, overtimeFlag: e.target.checked })} /> Allow overtime
           </label>
-          <input className="input" type="number" step="0.1" value={edit.overtimeRate} onChange={e => setEdit({ ...edit, overtimeRate: +e.target.value })} style={{ width: 80 }} disabled={!edit.overtimeFlag} />
+          <NumericInput className="input" step="0.1" value={edit.overtimeRate} onChange={v => setEdit({ ...edit, overtimeRate: v })} style={{ width: 80 }} disabled={!edit.overtimeFlag} />
           <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>× rate</span>
         </div>
       </Field>
@@ -154,9 +155,9 @@ function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCSta
             <option value="days">Days</option><option value="hours">Hours</option>
           </select>
         </Field>
-        <Field label="Monthly allocation"><input className="input" type="number" value={p.monthlyAllocation} onChange={e => setP({ ...p, monthlyAllocation: +e.target.value })} /></Field>
+        <Field label="Monthly allocation"><NumericInput className="input" value={p.monthlyAllocation} onChange={v => setP({ ...p, monthlyAllocation: v })} /></Field>
       </div>
-      <Field label="Budget"><input className="input" type="number" value={p.budget} onChange={e => setP({ ...p, budget: +e.target.value })} /></Field>
+      <Field label="Budget"><NumericInput className="input" value={p.budget} onChange={v => setP({ ...p, budget: v })} /></Field>
     </Drawer>
   )
 }
