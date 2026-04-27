@@ -168,7 +168,14 @@ function AddEmployeeModal({ state, onClose }: { state: ReturnType<typeof useCCSt
           <Select value={e.type} onChange={v => setE({ ...e, type: v as Employee['type'] })} options={EMPLOYMENT_TYPES} />
         </Field>
       </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <Field label="Email"><input className="input" type="email" placeholder="email@example.com" value={e.email} onChange={ev => setE({ ...e, email: ev.target.value })} /></Field>
+        <Field label="Phone"><input className="input" type="tel" placeholder="04xx xxx xxx" value={e.phone} onChange={ev => setE({ ...e, phone: ev.target.value })} /></Field>
+      </div>
       <Field label="Pay rate (AUD/hr)"><input className="input" type="number" value={e.payRate} onChange={ev => setE({ ...e, payRate: +ev.target.value })} /></Field>
+      <Field label={`Skills (${e.skills.length})`}>
+        <SkillsEditor selected={e.skills} allSkills={state.skills} onChange={skills => setE({ ...e, skills })} onAddSkill={state.addSkill} />
+      </Field>
     </Drawer>
   )
 }
