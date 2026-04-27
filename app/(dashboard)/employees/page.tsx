@@ -78,10 +78,9 @@ function ListManagerModal({ title, items, onAdd, onRemove, onRename, onClose, no
   )
 }
 
-function EmployeeCard({ emp, onOpen, onArchive, onUnarchive }: {
+function EmployeeCard({ emp, onOpen, onUnarchive }: {
   emp: Employee
   onOpen?: () => void
-  onArchive?: () => void
   onUnarchive?: () => void
 }) {
   const days = ['M', 'T', 'W', 'T', 'F', 'S']
@@ -94,20 +93,10 @@ function EmployeeCard({ emp, onOpen, onArchive, onUnarchive }: {
         <div className="staff-avatar" style={{ width: 44, height: 44, fontSize: 14 }}>{emp.name.split(' ').map(x => x[0]).join('')}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 16, fontWeight: 500, letterSpacing: '-0.01em' }}>{emp.name}</div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-3)', marginTop: 2 }}>{emp.role} · {emp.type}</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-3)', marginTop: 2 }}>{emp.type}</div>
         </div>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-3)' }}>${emp.payRate}/hr</div>
-          {onArchive && (
-            <button
-              className="iconbtn"
-              title="Archive employee"
-              onClick={e => { e.stopPropagation(); onArchive() }}
-              style={{ color: 'var(--ink-3)', marginLeft: 4 }}
-            >
-              <Icon name="archive" size={15} />
-            </button>
-          )}
           {onUnarchive && (
             <button
               className="btn"
@@ -145,9 +134,10 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
   const [edit, setEdit] = useState<Employee>(emp)
   const save = () => { state.updateEmployee(emp.id, edit); onClose() }
   const del = () => { if (confirm(`Remove ${emp.name}?`)) { state.deleteEmployee(emp.id); onClose() } }
+  const archive = () => { if (confirm(`Archive ${emp.name}? They will be removed from rostering and can be restored later.`)) { state.archiveEmployee(emp.id); onClose() } }
   const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
   return (
-    <Drawer title={emp.name} onClose={onClose} onSave={save} onDelete={del}>
+    <Drawer title={emp.name} onClose={onClose} onSave={save} onDelete={del} onArchive={archive}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Name"><input className="input" value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></Field>
         <Field label="Role">
@@ -257,12 +247,7 @@ export default function EmployeesPage() {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
           {visible.map(emp => (
-            <EmployeeCard
-              key={emp.id}
-              emp={emp}
-              onOpen={() => setSelected(emp.id)}
-              onArchive={() => state.archiveEmployee(emp.id)}
-            />
+            <EmployeeCard key={emp.id} emp={emp} onOpen={() => setSelected(emp.id)} />
           ))}
         </div>
 
