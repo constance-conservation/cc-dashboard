@@ -97,6 +97,18 @@ export type Invoice = {
   description: string | null
 }
 
+export type InventoryItem = {
+  id: string
+  name: string
+  category: string
+  quantity: number
+  unit: string
+  minStock: number
+  location: string | null
+  notes: string | null
+  active: boolean
+}
+
 export type Tender = {
   id: string
   name: string

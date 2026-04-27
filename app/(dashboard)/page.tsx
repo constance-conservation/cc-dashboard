@@ -15,6 +15,7 @@ const APPS = [
   { id: 'staff',     href: 'https://constance-reporting.vercel.app/', name: 'Staff Reporting', icon: 'staff' as const, desc: 'Daily reports, timesheets & incident logs' },
   { id: 'finance',   href: '/finances',   name: 'Finances',          icon: 'finance'   as const, desc: 'P&L, invoicing, cash position',        comingSoon: true },
   { id: 'fleet',     href: '/fleet',      name: 'Fleet & Equipment', icon: 'fleet'     as const, desc: 'Vehicles, servicing & live locations',  comingSoon: true },
+  { id: 'inventory', href: '/inventory',  name: 'Inventory',         icon: 'inventory' as const, desc: 'Stock levels, consumables & equipment',  comingSoon: true },
 ]
 
 type AppStats = Record<string, { statVal?: string | number; stat?: string; badge?: string | null; badgeKind?: string }>
