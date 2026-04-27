@@ -57,29 +57,105 @@ function Spark({ data, color }: { data: number[]; color?: string }) {
   )
 }
 
-// ── Weather widget (placeholder — pending weather API) ─────────
+// ── WMO weather code helpers ───────────────────────────────────
+function wmoIcon(code: number): string {
+  if (code === 0) return '☀'
+  if (code <= 2) return '🌤'
+  if (code === 3) return '☁'
+  if (code <= 48) return '🌫'
+  if (code <= 55) return '🌦'
+  if (code <= 67) return '🌧'
+  if (code <= 77) return '❄'
+  if (code <= 82) return '🌦'
+  return '⛈'
+}
+
+function wmoDesc(code: number): string {
+  if (code === 0) return 'clear sky'
+  if (code <= 2) return 'partly cloudy'
+  if (code === 3) return 'overcast'
+  if (code <= 48) return 'foggy'
+  if (code <= 55) return 'drizzle'
+  if (code <= 67) return 'rain'
+  if (code <= 77) return 'snow'
+  if (code <= 82) return 'showers'
+  return 'thunderstorm'
+}
+
+function windDirLabel(deg: number): string {
+  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+  return dirs[Math.round(deg / 45) % 8]
+}
+
+type WeatherDay = { day: string; high: number; icon: string }
+type WeatherData = {
+  temp: number
+  desc: string
+  windSpeed: number
+  windDir: string
+  rainPct: number
+  forecast: WeatherDay[]
+}
+
+// ── Weather widget — Open-Meteo, Camden NSW ────────────────────
 function WeatherWidget() {
-  const forecast = [
-    ['Mon', '21°', '☀'], ['Tue', '23°', '☀'], ['Wed', '19°', '⛅'],
-    ['Thu', '17°', '🌧'], ['Fri', '18°', '⛅'], ['Sat', '20°', '☀'],
-  ] as const
+  const [wx, setWx] = useState<WeatherData | null>(null)
+
+  useEffect(() => {
+    const url =
+      'https://api.open-meteo.com/v1/forecast' +
+      '?latitude=-34.0519&longitude=150.6958' +
+      '&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m' +
+      '&daily=weather_code,temperature_2m_max,precipitation_probability_max' +
+      '&timezone=Australia%2FSydney&forecast_days=7'
+    fetch(url)
+      .then(r => r.json())
+      .then(data => {
+        const c = data.current
+        const d = data.daily
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+        const forecast: WeatherDay[] = (d.time as string[]).slice(1, 7).map((t: string, i: number) => ({
+          day: dayNames[new Date(t + 'T12:00:00').getDay()],
+          high: Math.round(d.temperature_2m_max[i + 1]),
+          icon: wmoIcon(d.weather_code[i + 1]),
+        }))
+        setWx({
+          temp: Math.round(c.temperature_2m),
+          desc: wmoDesc(c.weather_code),
+          windSpeed: Math.round(c.wind_speed_10m),
+          windDir: windDirLabel(c.wind_direction_10m),
+          rainPct: d.precipitation_probability_max[0] ?? 0,
+          forecast,
+        })
+      })
+      .catch(() => {})
+  }, [])
+
   return (
     <div className="kpi">
       <div className="kpi-label">Weather — Camden field office</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <div className="kpi-value">19°</div>
-        <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>partly cloudy</div>
-      </div>
-      <div className="kpi-delta">Light winds SE · 12 km/h · 0% rain</div>
-      <div style={{ display: 'flex', gap: 4, marginTop: 10, justifyContent: 'space-between' }}>
-        {forecast.map(([d, t, icon]) => (
-          <div key={d} style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            <div>{d}</div>
-            <div style={{ fontSize: 13, margin: '3px 0' }}>{icon}</div>
-            <div style={{ color: 'var(--ink)', fontSize: 11 }}>{t}</div>
+      {wx ? (
+        <>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <div className="kpi-value">{wx.temp}°</div>
+            <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>{wx.desc}</div>
           </div>
-        ))}
-      </div>
+          <div className="kpi-delta">
+            {wx.windDir} winds · {wx.windSpeed} km/h · {wx.rainPct}% rain
+          </div>
+          <div style={{ display: 'flex', gap: 4, marginTop: 10, justifyContent: 'space-between' }}>
+            {wx.forecast.map(f => (
+              <div key={f.day} style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <div>{f.day}</div>
+                <div style={{ fontSize: 13, margin: '3px 0' }}>{f.icon}</div>
+                <div style={{ color: 'var(--ink)', fontSize: 11 }}>{f.high}°</div>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div style={{ color: 'var(--ink-3)', fontSize: 12, marginTop: 8 }}>Loading…</div>
+      )}
     </div>
   )
 }
@@ -283,6 +359,7 @@ export default function DashboardPage() {
             <div><span className="label">On shift today</span><span className="val">{onShiftToday > 0 ? `${onShiftToday} staff across ${activeSites} site${activeSites !== 1 ? 's' : ''}` : 'No crew rostered'}</span></div>
             <div><span className="label">Active projects</span><span className="val">{state.projects.length} running</span></div>
             <div><span className="label">Outstanding invoices</span><span className="val">{summary ? fmt(summary.outstandingAmount) : '—'}</span></div>
+
           </div>
         </div>
       </div>
