@@ -145,9 +145,9 @@ function ProjectDrawer({ projectId, state, onClose }: { projectId: string; state
 function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCState>; onClose: () => void }) {
   const [p, setP] = useState<Omit<Project, 'id'>>({
     name: '', client: '', start: '', end: '', unit: 'days',
-    monthlyAllocation: 20, visitsPerMonth: 10, crewSize: 3,
+    monthlyAllocation: 0, visitsPerMonth: 0, crewSize: 3,
     chargeOutRate: 0, overtimeFlag: false, overtimeRate: 1.5,
-    priority: 'medium', budget: 20000, spent: 0, skills: [],
+    priority: 'medium', budget: 0, spent: 0, skills: [],
   })
   const [existingClients, setExistingClients] = useState<string[]>([])
   const [newClient, setNewClient] = useState(false)
