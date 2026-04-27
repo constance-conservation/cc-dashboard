@@ -147,7 +147,7 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
   const del = () => { if (confirm(`Remove ${emp.name}?`)) { state.deleteEmployee(emp.id); onClose() } }
   const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
   return (
-    <Drawer title={emp.name} subtitle={emp.role} onClose={onClose} onSave={save} onDelete={del}>
+    <Drawer title={emp.name} onClose={onClose} onSave={save} onDelete={del}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Name"><input className="input" value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></Field>
         <Field label="Role">
