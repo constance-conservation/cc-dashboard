@@ -6,6 +6,7 @@ import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer, Field } from '@/components/dashboard/Drawer'
 import { Select } from '@/components/dashboard/Select'
+import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
 import type { Project } from '@/lib/types'
 
@@ -106,9 +107,21 @@ function ProjectCard({ project, state, onOpen }: { project: Project; state: Retu
 function ProjectDrawer({ projectId, state, onClose }: { projectId: string; state: ReturnType<typeof useCCState>; onClose: () => void }) {
   const p = state.projects.find(x => x.id === projectId)!
   const [edit, setEdit] = useState<Project>(p)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const save = () => { state.updateProject(p.id, edit); onClose() }
-  const del = () => { if (confirm(`Remove ${p.name}?`)) { state.deleteProject(p.id); onClose() } }
+  const del = () => setConfirmDelete(true)
   return (
+    <>
+    {confirmDelete && (
+      <ConfirmDialog
+        title={`Delete ${p.name}?`}
+        message={`This will permanently remove the project from the system. Any roster assignments to "${p.name}" will also be cleared.`}
+        confirmLabel="Delete project"
+        danger
+        onConfirm={() => { state.deleteProject(p.id); onClose() }}
+        onCancel={() => setConfirmDelete(false)}
+      />
+    )}
     <Drawer title={p.name} subtitle={p.client} onClose={onClose} onSave={save} onDelete={del}>
       <Field label="Project name"><input className="input" value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></Field>
       <Field label="Client"><input className="input" value={edit.client} onChange={e => setEdit({ ...edit, client: e.target.value })} /></Field>
@@ -146,6 +159,7 @@ function ProjectDrawer({ projectId, state, onClose }: { projectId: string; state
         <SkillsEditor selected={edit.skills} allSkills={state.skills} onChange={skills => setEdit({ ...edit, skills })} onAddSkill={state.addSkill} />
       </Field>
     </Drawer>
+    </>
   )
 }
 

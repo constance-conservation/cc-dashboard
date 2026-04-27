@@ -6,6 +6,7 @@ import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer } from '@/components/dashboard/Drawer'
 import { Select } from '@/components/dashboard/Select'
+import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import type { RosterAssignment, Project, Employee } from '@/lib/types'
 
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
@@ -244,6 +245,7 @@ export default function RosteringPage() {
   const [selectedDay, setSelectedDay] = useState<number | null>(null)
   const [showHelp, setShowHelp] = useState(false)
   const [isDark, setIsDark] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<'autogen' | 'clear' | null>(null)
 
   useEffect(() => {
     setIsDark(document.documentElement.getAttribute('data-mode') === 'dark')
@@ -281,20 +283,22 @@ export default function RosteringPage() {
     return { totalShifts, uniqueStaff: uniqueStaff.size, projectVisits }
   }, [state.roster, state.rosterMonth, state.projects])
 
-  const handleAutoGen = () => {
-    if (!confirm(`Auto-generate roster for ${monthName}? This will replace any existing assignments for this month.`)) return
-    const generated = autoGenerate(state)
-    const newRoster = { ...state.roster }
-    Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
-    Object.assign(newRoster, generated)
-    state.setRoster(newRoster)
-  }
+  const handleAutoGen = () => setConfirmAction('autogen')
+  const handleClear = () => setConfirmAction('clear')
 
-  const handleClear = () => {
-    if (!confirm(`Clear all assignments for ${monthName}?`)) return
-    const newRoster = { ...state.roster }
-    Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
-    state.setRoster(newRoster)
+  const handleConfirmAction = () => {
+    if (confirmAction === 'autogen') {
+      const generated = autoGenerate(state)
+      const newRoster = { ...state.roster }
+      Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
+      Object.assign(newRoster, generated)
+      state.setRoster(newRoster)
+    } else if (confirmAction === 'clear') {
+      const newRoster = { ...state.roster }
+      Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
+      state.setRoster(newRoster)
+    }
+    setConfirmAction(null)
   }
 
   const prevMonth = () => {
@@ -390,6 +394,25 @@ export default function RosteringPage() {
 
       {selectedDay && <DayEditor day={selectedDay} ym={state.rosterMonth} state={state} onClose={() => setSelectedDay(null)} />}
       {showHelp && <RulesModal onClose={() => setShowHelp(false)} />}
+      {confirmAction === 'autogen' && (
+        <ConfirmDialog
+          title={`Auto-generate ${monthName}?`}
+          message="This will replace all existing assignments for this month with an automatically generated roster. Any manual changes will be lost."
+          confirmLabel="Auto-generate"
+          onConfirm={handleConfirmAction}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
+      {confirmAction === 'clear' && (
+        <ConfirmDialog
+          title={`Clear ${monthName}?`}
+          message="All roster assignments for this month will be permanently removed. This cannot be undone."
+          confirmLabel="Clear month"
+          danger
+          onConfirm={handleConfirmAction}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
     </div>
   )
 }
