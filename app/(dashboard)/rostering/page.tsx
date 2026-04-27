@@ -345,13 +345,6 @@ export default function RosteringPage() {
           <button className="btn primary" onClick={handleAutoGen}><Icon name="cloud" size={14} /> Auto-generate</button>
           <button className="btn" onClick={handleClear}>Clear month</button>
           <button className="btn" onClick={() => setShowHelp(true)}>Rules</button>
-          <button className="btn" onClick={toggleDark} title="Toggle dark mode" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {isDark
-              ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-              : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-            }
-            {isDark ? 'Light' : 'Dark'}
-          </button>
           <div style={{ flex: 1 }} />
           <button className="btn" onClick={prevMonth}>←</button>
           <div className="chip" style={{ fontFamily: 'var(--font-display)', fontSize: 16, height: 32, padding: '0 14px', textTransform: 'none', letterSpacing: '-0.01em' }}>{monthName}</div>
