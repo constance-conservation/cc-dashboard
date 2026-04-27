@@ -146,7 +146,7 @@ function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCSta
   const [p, setP] = useState<Omit<Project, 'id'>>({
     name: '', client: '', start: '', end: '', unit: 'days',
     monthlyAllocation: 20, visitsPerMonth: 10, crewSize: 3,
-    chargeOutRate: 1000, overtimeFlag: false, overtimeRate: 1.5,
+    chargeOutRate: 0, overtimeFlag: false, overtimeRate: 1.5,
     priority: 'medium', budget: 20000, spent: 0, skills: [],
   })
   const [existingClients, setExistingClients] = useState<string[]>([])
