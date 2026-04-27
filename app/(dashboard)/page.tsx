@@ -13,7 +13,7 @@ const APPS = [
   { id: 'employees', href: '/employees',  name: 'Employees',         icon: 'employees' as const, desc: 'Team details, skills & availability' },
   { id: 'tender',    href: '/tendering',  name: 'Tendering',         icon: 'tender'    as const, desc: 'Live bids, proposals & submissions',  comingSoon: true },
   { id: 'staff',     href: 'https://constance-reporting.vercel.app/', name: 'Staff Reporting', icon: 'staff' as const, desc: 'Daily reports, timesheets & incident logs' },
-  { id: 'finance',   href: '/finances',   name: 'Finances',          icon: 'finance'   as const, desc: 'P&L, invoicing, cash position',        comingSoon: true },
+  { id: 'finance',   href: '/finances',   name: 'Finances',          icon: 'finance'   as const, desc: 'P&L, invoicing, cash position' },
   { id: 'fleet',     href: '/fleet',      name: 'Fleet & Equipment', icon: 'fleet'     as const, desc: 'Vehicles, servicing & live locations',  comingSoon: true },
 ]
 
