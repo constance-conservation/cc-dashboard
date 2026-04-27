@@ -8,13 +8,13 @@ import { createClient } from '@/lib/supabase/client'
 
 // ── App definitions ────────────────────────────────────────────
 const APPS = [
-  { id: 'roster', href: '/rostering', name: 'Rostering', icon: 'roster' as const, desc: 'Monthly crew scheduling by project' },
-  { id: 'projects', href: '/projects', name: 'Projects', icon: 'projects' as const, desc: 'Live project list, capacity & budget' },
-  { id: 'employees', href: '/employees', name: 'Employees', icon: 'employees' as const, desc: 'Team details, skills & availability' },
-  { id: 'tender', href: '/tendering', name: 'Tendering', icon: 'tender' as const, desc: 'Live bids, proposals & submissions' },
-  { id: 'staff', href: 'https://constance-reporting.vercel.app/', name: 'Staff Reporting', icon: 'staff' as const, desc: 'Daily reports, timesheets & incident logs' },
-  { id: 'finance', href: '/finances', name: 'Finances', icon: 'finance' as const, desc: 'P&L, invoicing, cash position' },
-  { id: 'fleet', href: '/fleet', name: 'Fleet & Equipment', icon: 'fleet' as const, desc: 'Vehicles, servicing & live locations' },
+  { id: 'roster',    href: '/rostering',  name: 'Rostering',        icon: 'roster'    as const, desc: 'Monthly crew scheduling by project' },
+  { id: 'projects',  href: '/projects',   name: 'Projects',          icon: 'projects'  as const, desc: 'Live project list, capacity & budget' },
+  { id: 'employees', href: '/employees',  name: 'Employees',         icon: 'employees' as const, desc: 'Team details, skills & availability' },
+  { id: 'tender',    href: '/tendering',  name: 'Tendering',         icon: 'tender'    as const, desc: 'Live bids, proposals & submissions',  comingSoon: true },
+  { id: 'staff',     href: 'https://constance-reporting.vercel.app/', name: 'Staff Reporting', icon: 'staff' as const, desc: 'Daily reports, timesheets & incident logs' },
+  { id: 'finance',   href: '/finances',   name: 'Finances',          icon: 'finance'   as const, desc: 'P&L, invoicing, cash position',        comingSoon: true },
+  { id: 'fleet',     href: '/fleet',      name: 'Fleet & Equipment', icon: 'fleet'     as const, desc: 'Vehicles, servicing & live locations',  comingSoon: true },
 ]
 
 type AppStats = Record<string, { statVal?: string | number; stat?: string; badge?: string | null; badgeKind?: string }>
@@ -166,22 +166,26 @@ function AppGridCards({ stats }: { stats: AppStats }) {
     <div className="app-grid">
       {APPS.map(app => {
         const s = stats[app.id] || {}
-        return (
-          <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
-            <div className="app-card">
-              <div className="app-card-top">
-                <div className="app-icon"><Icon name={app.icon} /></div>
-                {s.badge && <span className={`app-badge ${s.badgeKind || ''}`}>{s.badge}</span>}
-              </div>
-              <h3 className="app-name">{app.name}</h3>
-              <p className="app-desc">{app.desc}</p>
-              <div className="app-footer">
-                <span className="app-stat"><b>{s.statVal ?? '—'}</b>{s.stat || ''}</span>
-                <span className="app-arrow"><Icon name="arrow" size={14} /></span>
-              </div>
+        const card = (
+          <div className="app-card" style={(app as {comingSoon?: boolean}).comingSoon ? { opacity: 0.55, cursor: 'default', pointerEvents: 'none' } : undefined}>
+            <div className="app-card-top">
+              <div className="app-icon"><Icon name={app.icon} /></div>
+              {(app as {comingSoon?: boolean}).comingSoon
+                ? <span className="app-badge">Coming soon</span>
+                : s.badge && <span className={`app-badge ${s.badgeKind || ''}`}>{s.badge}</span>}
             </div>
-          </Link>
+            <h3 className="app-name">{app.name}</h3>
+            <p className="app-desc">{app.desc}</p>
+            <div className="app-footer">
+              {(app as {comingSoon?: boolean}).comingSoon
+                ? <span className="app-stat" style={{ color: 'var(--ink-4)', fontStyle: 'italic' }}>In development</span>
+                : <><span className="app-stat"><b>{s.statVal ?? '—'}</b>{s.stat || ''}</span><span className="app-arrow"><Icon name="arrow" size={14} /></span></>}
+            </div>
+          </div>
         )
+        return (app as {comingSoon?: boolean}).comingSoon
+          ? <div key={app.id} style={{ textDecoration: 'none' }}>{card}</div>
+          : <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{card}</Link>
       })}
     </div>
   )
@@ -192,24 +196,28 @@ function AppListRows({ stats }: { stats: AppStats }) {
     <div className="app-list">
       {APPS.map(app => {
         const s = stats[app.id] || {}
-        return (
-          <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
-            <div className="app-row">
-              <div className="app-icon"><Icon name={app.icon} size={18} /></div>
-              <div>
-                <div className="row-name">{app.name}</div>
-                <div className="row-desc">{app.desc}</div>
-              </div>
-              <div className="row-stat"><b>{s.statVal ?? '—'}</b> {s.stat || ''}</div>
-              <div>
-                {s.badge
+        const cs = (app as {comingSoon?: boolean}).comingSoon
+        const row = (
+          <div className="app-row" style={cs ? { opacity: 0.55, cursor: 'default', pointerEvents: 'none' } : undefined}>
+            <div className="app-icon"><Icon name={app.icon} size={18} /></div>
+            <div>
+              <div className="row-name">{app.name}</div>
+              <div className="row-desc">{app.desc}</div>
+            </div>
+            <div className="row-stat">{cs ? <span style={{ fontStyle: 'italic', color: 'var(--ink-4)' }}>—</span> : <><b>{s.statVal ?? '—'}</b> {s.stat || ''}</>}</div>
+            <div>
+              {cs
+                ? <span className="pill">Coming soon</span>
+                : s.badge
                   ? <span className={`pill ${s.badgeKind === 'alert' ? 'warn' : ''}`}><span className="dot" />{s.badge}</span>
                   : <span className="pill"><span className="dot" />Nominal</span>}
-              </div>
-              <div className="row-launch">Launch →</div>
             </div>
-          </Link>
+            <div className="row-launch">{cs ? '' : 'Launch →'}</div>
+          </div>
         )
+        return cs
+          ? <div key={app.id} style={{ textDecoration: 'none' }}>{row}</div>
+          : <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{row}</Link>
       })}
     </div>
   )
@@ -218,15 +226,19 @@ function AppListRows({ stats }: { stats: AppStats }) {
 function AppCompactGrid() {
   return (
     <div className="app-compact-grid">
-      {APPS.map(app => (
-        <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
-          <div className="app-compact">
+      {APPS.map(app => {
+        const cs = (app as {comingSoon?: boolean}).comingSoon
+        const tile = (
+          <div className="app-compact" style={cs ? { opacity: 0.55, cursor: 'default', pointerEvents: 'none' } : undefined}>
             <div className="app-icon"><Icon name={app.icon} size={16} /></div>
             <div className="name">{app.name}</div>
-            <div className="hint">Open →</div>
+            <div className="hint">{cs ? 'Coming soon' : 'Open →'}</div>
           </div>
-        </Link>
-      ))}
+        )
+        return cs
+          ? <div key={app.id} style={{ textDecoration: 'none' }}>{tile}</div>
+          : <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{tile}</Link>
+      })}
     </div>
   )
 }
