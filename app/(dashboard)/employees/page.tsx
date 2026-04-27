@@ -78,19 +78,47 @@ function ListManagerModal({ title, items, onAdd, onRemove, onRename, onClose, no
   )
 }
 
-function EmployeeCard({ emp, onOpen }: { emp: Employee; onOpen: () => void }) {
+function EmployeeCard({ emp, onOpen, onArchive, onUnarchive }: {
+  emp: Employee
+  onOpen?: () => void
+  onArchive?: () => void
+  onUnarchive?: () => void
+}) {
   const days = ['M', 'T', 'W', 'T', 'F', 'S']
   const keys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
   const availCount = keys.filter(k => emp.availability[k]).length
+  const isArchived = !!onUnarchive
   return (
-    <div className="app-card" onClick={onOpen} style={{ minHeight: 0, gap: 14 }}>
+    <div className="app-card" onClick={onOpen} style={{ minHeight: 0, gap: 14, cursor: onOpen ? 'pointer' : 'default', opacity: isArchived ? 0.75 : 1 }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
         <div className="staff-avatar" style={{ width: 44, height: 44, fontSize: 14 }}>{emp.name.split(' ').map(x => x[0]).join('')}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 16, fontWeight: 500, letterSpacing: '-0.01em' }}>{emp.name}</div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-3)', marginTop: 2 }}>{emp.role} · {emp.type}</div>
         </div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-3)' }}>${emp.payRate}/hr</div>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-3)' }}>${emp.payRate}/hr</div>
+          {onArchive && (
+            <button
+              className="iconbtn"
+              title="Archive employee"
+              onClick={e => { e.stopPropagation(); onArchive() }}
+              style={{ color: 'var(--ink-3)', marginLeft: 4 }}
+            >
+              <Icon name="archive" size={15} />
+            </button>
+          )}
+          {onUnarchive && (
+            <button
+              className="btn"
+              title="Restore employee"
+              onClick={e => { e.stopPropagation(); onUnarchive() }}
+              style={{ fontSize: 11, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
+            >
+              <Icon name="unarchive" size={12} /> Restore
+            </button>
+          )}
+        </div>
       </div>
       <div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-4)', marginBottom: 6 }}>Availability</div>
@@ -99,7 +127,7 @@ function EmployeeCard({ emp, onOpen }: { emp: Employee; onOpen: () => void }) {
             <div key={i} style={{ flex: 1, height: 26, borderRadius: 4, display: 'grid', placeItems: 'center', fontSize: 11, fontFamily: 'var(--font-mono)', background: emp.availability[keys[i]] ? 'var(--accent-soft)' : 'var(--bg-sunken)', color: emp.availability[keys[i]] ? 'var(--accent)' : 'var(--ink-4)', border: '1px solid ' + (emp.availability[keys[i]] ? 'transparent' : 'var(--line)') }}>{d}</div>
           ))}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 6 }}>{availCount} days/week available</div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 6 }}>{isArchived ? 'Archived — not available for rostering' : `${availCount} days/week available`}</div>
       </div>
       <div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-4)', marginBottom: 6 }}>Skills ({emp.skills.length})</div>
@@ -199,8 +227,12 @@ export default function EmployeesPage() {
   const [showSkills, setShowSkills] = useState(false)
   const [showRoles, setShowRoles] = useState(false)
   const [filter, setFilter] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
 
   const visible = state.employees.filter(e =>
+    !filter || e.name.toLowerCase().includes(filter.toLowerCase()) || e.role.toLowerCase().includes(filter.toLowerCase())
+  )
+  const visibleArchived = state.archivedEmployees.filter(e =>
     !filter || e.name.toLowerCase().includes(filter.toLowerCase()) || e.role.toLowerCase().includes(filter.toLowerCase())
   )
 
@@ -209,7 +241,7 @@ export default function EmployeesPage() {
       <div className="subpage-top">
         <Link href="/" className="back-btn"><Icon name="back" size={16} /> Dashboard</Link>
         <div style={{ width: 1, height: 20, background: 'var(--line)' }} />
-        <span className="sp-crumb">{state.employees.length} team members · {state.skills.length} skills tracked</span>
+        <span className="sp-crumb">{state.employees.length} active · {state.skills.length} skills tracked</span>
         <div style={{ flex: 1 }} />
         <h2 className="sp-title">Employees</h2>
       </div>
@@ -224,8 +256,41 @@ export default function EmployeesPage() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-          {visible.map(emp => <EmployeeCard key={emp.id} emp={emp} onOpen={() => setSelected(emp.id)} />)}
+          {visible.map(emp => (
+            <EmployeeCard
+              key={emp.id}
+              emp={emp}
+              onOpen={() => setSelected(emp.id)}
+              onArchive={() => state.archiveEmployee(emp.id)}
+            />
+          ))}
         </div>
+
+        {state.archivedEmployees.length > 0 && (
+          <div style={{ marginTop: 32 }}>
+            <button
+              onClick={() => setShowArchived(v => !v)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', padding: '8px 0', color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}
+            >
+              <Icon name="archive" size={14} />
+              Archived ({state.archivedEmployees.length})
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ transform: showArchived ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }}>
+                <path d="M2 3l3 4 3-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+            {showArchived && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12, marginTop: 12 }}>
+                {visibleArchived.map(emp => (
+                  <EmployeeCard
+                    key={emp.id}
+                    emp={emp}
+                    onUnarchive={() => state.unarchiveEmployee(emp.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {selected && <EmployeeDrawer employeeId={selected} state={state} onClose={() => setSelected(null)} />}

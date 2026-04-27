@@ -61,6 +61,7 @@ export type Roster = Record<string, RosterAssignment[]>
 export type CCState = {
   projects: Project[]
   employees: Employee[]
+  archivedEmployees: Employee[]
   skills: string[]
   roles: string[]
   tasks: Task[]

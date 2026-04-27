@@ -3,7 +3,7 @@ type IconName =
   | 'employees' | 'projects' | 'tasks' | 'back' | 'arrow'
   | 'search' | 'bell' | 'settings' | 'close' | 'x'
   | 'plus' | 'filter' | 'download' | 'check' | 'trash'
-  | 'edit' | 'cloud'
+  | 'edit' | 'cloud' | 'archive' | 'unarchive'
 
 type IconProps = {
   name: IconName
@@ -34,6 +34,8 @@ export function Icon({ name, size = 20 }: IconProps) {
     trash: <><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></>,
     edit: <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>,
     cloud: <path d="M18 10h-1a6 6 0 0 0-11.7-1A4 4 0 0 0 6 17h12a3.5 3.5 0 0 0 0-7z"/>,
+    archive: <><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 13h4"/></>,
+    unarchive: <><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M12 17v-5M9.5 14.5l2.5-3 2.5 3"/></>,
   }
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">

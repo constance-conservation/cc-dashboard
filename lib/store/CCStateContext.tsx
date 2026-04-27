@@ -83,9 +83,11 @@ type CCActions = {
   updateProject:   (id: string, patch: Partial<Project>) => void
   addProject:      (p: Omit<Project, 'id'>) => void
   deleteProject:   (id: string) => void
-  updateEmployee:  (id: string, patch: Partial<Employee>) => void
-  addEmployee:     (e: Omit<Employee, 'id'>) => void
-  deleteEmployee:  (id: string) => void
+  updateEmployee:   (id: string, patch: Partial<Employee>) => void
+  addEmployee:      (e: Omit<Employee, 'id'>) => void
+  deleteEmployee:   (id: string) => void
+  archiveEmployee:  (id: string) => void
+  unarchiveEmployee:(id: string) => void
   addSkill:        (skill: string) => void
   removeSkill:     (skill: string) => void
   renameSkill:     (oldName: string, newName: string) => void
@@ -108,7 +110,7 @@ type CCContext = CCState & CCActions
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const EMPTY_STATE: CCState = {
-  projects: [], employees: [], skills: [], roles: [],
+  projects: [], employees: [], archivedEmployees: [], skills: [], roles: [],
   tasks: [], roster: {}, rosterMonth: new Date().toISOString().slice(0, 7),
 }
 
@@ -176,7 +178,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           .from('staff')
           .select('*')
           .eq('organization_id', oid)
-          .eq('active', true),
+          .order('name'),
         supabase
           .from('client_contracts')
           .select('*, clients(name)')
@@ -218,8 +220,10 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         })
       }
 
+      const allStaff = (staffRows ?? []).map(r => r as Record<string, unknown>)
       setState({
-        employees:    (staffRows ?? []).map(r => rowToEmployee(r as Record<string, unknown>)),
+        employees:         allStaff.filter(r => r.active !== false).map(rowToEmployee),
+        archivedEmployees: allStaff.filter(r => r.active === false).map(rowToEmployee),
         projects:     (contractRows ?? []).map(r => rowToProject(r as Record<string, unknown>)),
         skills:       (skillRows ?? []).map(r => (r as Record<string, unknown>).name as string),
         roles:        (roleRows ?? []).map(r => (r as Record<string, unknown>).name as string),
@@ -394,6 +398,40 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .update({ active: false })
         .eq('id', id)
         .then(({ error }) => { if (error) console.error('deleteEmployee:', error) })
+    }
+
+    const CLEARED_AVAIL = { mon: false, tue: false, wed: false, thu: false, fri: false, sat: false }
+
+    function archiveEmployee(id: string) {
+      setState(prev => {
+        const emp = prev.employees.find(e => e.id === id)
+        if (!emp) return prev
+        return {
+          ...prev,
+          employees:         prev.employees.filter(e => e.id !== id),
+          archivedEmployees: [...prev.archivedEmployees, { ...emp, availability: CLEARED_AVAIL }],
+        }
+      })
+      db.from('staff')
+        .update({ active: false, availability: CLEARED_AVAIL })
+        .eq('id', id)
+        .then(({ error }) => { if (error) console.error('archiveEmployee:', error) })
+    }
+
+    function unarchiveEmployee(id: string) {
+      setState(prev => {
+        const emp = prev.archivedEmployees.find(e => e.id === id)
+        if (!emp) return prev
+        return {
+          ...prev,
+          archivedEmployees: prev.archivedEmployees.filter(e => e.id !== id),
+          employees:         [...prev.employees, emp],
+        }
+      })
+      db.from('staff')
+        .update({ active: true })
+        .eq('id', id)
+        .then(({ error }) => { if (error) console.error('unarchiveEmployee:', error) })
     }
 
     // ── Skills ─────────────────────────────────────────────────
@@ -629,6 +667,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       updateEmployee,
       addEmployee,
       deleteEmployee,
+      archiveEmployee,
+      unarchiveEmployee,
       addSkill,
       removeSkill,
       renameSkill,
