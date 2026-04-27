@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer, Field } from '@/components/dashboard/Drawer'
+import { createClient } from '@/lib/supabase/client'
 import type { Project } from '@/lib/types'
 
 function CapacityMeter({ label, pct, caption }: { label: string; pct: number; caption: string }) {
@@ -142,21 +143,121 @@ function ProjectDrawer({ projectId, state, onClose }: { projectId: string; state
 }
 
 function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCState>; onClose: () => void }) {
-  const [p, setP] = useState<Omit<Project, 'id'>>({ name: '', client: '', start: '', end: '', unit: 'days', monthlyAllocation: 20, visitsPerMonth: 10, crewSize: 3, chargeOutRate: 1000, overtimeFlag: false, overtimeRate: 1.5, priority: 'medium', budget: 20000, spent: 0, skills: [] })
-  const save = () => { if (!p.name) return; state.addProject(p); onClose() }
+  const [p, setP] = useState<Omit<Project, 'id'>>({
+    name: '', client: '', start: '', end: '', unit: 'days',
+    monthlyAllocation: 20, visitsPerMonth: 10, crewSize: 3,
+    chargeOutRate: 1000, overtimeFlag: false, overtimeRate: 1.5,
+    priority: 'medium', budget: 20000, spent: 0, skills: [],
+  })
+  const [existingClients, setExistingClients] = useState<string[]>([])
+  const [newClient, setNewClient] = useState(false)
+  const [flexibleCrew, setFlexibleCrew] = useState(false)
+
+  useEffect(() => {
+    const supabase = createClient()
+    async function loadClients() {
+      const { data: org } = await supabase.from('organizations').select('id').limit(1).single()
+      if (!org) return
+      const { data: rows } = await supabase
+        .from('clients')
+        .select('name')
+        .eq('organization_id', (org as Record<string, unknown>).id as string)
+        .order('name')
+      setExistingClients((rows ?? []).map(r => (r as Record<string, unknown>).name as string))
+    }
+    loadClients()
+  }, [])
+
+  const save = () => {
+    if (!p.name.trim()) return
+    state.addProject({ ...p, crewSize: flexibleCrew ? 0 : p.crewSize })
+    onClose()
+  }
+
   return (
     <Drawer title="New project" subtitle="Add to projects list" onClose={onClose} onSave={save} saveLabel="Create">
-      <Field label="Project name"><input className="input" value={p.name} onChange={e => setP({ ...p, name: e.target.value })} autoFocus /></Field>
-      <Field label="Client"><input className="input" value={p.client} onChange={e => setP({ ...p, client: e.target.value })} /></Field>
+      <Field label="Project name">
+        <input className="input" value={p.name} onChange={e => setP({ ...p, name: e.target.value })} autoFocus />
+      </Field>
+
+      <Field label="Client">
+        {!newClient ? (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <select className="select" style={{ flex: 1 }} value={p.client} onChange={e => {
+              if (e.target.value === '__new__') { setNewClient(true); setP({ ...p, client: '' }) }
+              else setP({ ...p, client: e.target.value })
+            }}>
+              <option value="">Select client…</option>
+              {existingClients.map(c => <option key={c} value={c}>{c}</option>)}
+              <option value="__new__">+ New client…</option>
+            </select>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input className="input" style={{ flex: 1 }} placeholder="New client name…" value={p.client}
+              onChange={e => setP({ ...p, client: e.target.value })} autoFocus />
+            <button className="btn" type="button" onClick={() => { setNewClient(false); setP({ ...p, client: '' }) }}>Cancel</button>
+          </div>
+        )}
+      </Field>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <Field label="Unit">
-          <select className="select" value={p.unit} onChange={e => setP({ ...p, unit: e.target.value as 'days' | 'hours' })}>
-            <option value="days">Days</option><option value="hours">Hours</option>
+        <Field label="Start date"><input className="input" type="date" value={p.start} onChange={e => setP({ ...p, start: e.target.value })} /></Field>
+        <Field label="End date"><input className="input" type="date" value={p.end} onChange={e => setP({ ...p, end: e.target.value })} /></Field>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <Field label="Priority">
+          <select className="select" value={p.priority} onChange={e => setP({ ...p, priority: e.target.value as Project['priority'] })}>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
           </select>
         </Field>
-        <Field label="Monthly allocation"><input className="input" type="number" value={p.monthlyAllocation} onChange={e => setP({ ...p, monthlyAllocation: +e.target.value })} /></Field>
+        <Field label="Work unit">
+          <select className="select" value={p.unit} onChange={e => setP({ ...p, unit: e.target.value as 'days' | 'hours' })}>
+            <option value="days">Days</option>
+            <option value="hours">Hours</option>
+          </select>
+        </Field>
       </div>
-      <Field label="Budget"><input className="input" type="number" value={p.budget} onChange={e => setP({ ...p, budget: +e.target.value })} /></Field>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <Field label={`Monthly allocation (${p.unit})`}>
+          <input className="input" type="number" value={p.monthlyAllocation} onChange={e => setP({ ...p, monthlyAllocation: +e.target.value })} />
+        </Field>
+        <Field label="Visits per month">
+          <input className="input" type="number" value={p.visitsPerMonth} onChange={e => setP({ ...p, visitsPerMonth: +e.target.value })} />
+        </Field>
+      </div>
+
+      <Field label="Crew size">
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <input type="checkbox" checked={flexibleCrew} onChange={e => setFlexibleCrew(e.target.checked)} />
+            Flexible
+          </label>
+          {!flexibleCrew && (
+            <>
+              <input className="input" type="number" min="1" value={p.crewSize} onChange={e => setP({ ...p, crewSize: +e.target.value })} style={{ width: 80 }} />
+              <span style={{ fontSize: 12, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>fixed staff per day</span>
+            </>
+          )}
+        </div>
+      </Field>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <Field label={`Charge-out rate ($ per ${p.unit === 'hours' ? 'hr' : 'day'})`}>
+          <input className="input" type="number" value={p.chargeOutRate} onChange={e => setP({ ...p, chargeOutRate: +e.target.value })} />
+        </Field>
+        <Field label="Budget ($)">
+          <input className="input" type="number" value={p.budget} onChange={e => setP({ ...p, budget: +e.target.value })} />
+        </Field>
+      </div>
+
+      <Field label="Required skills">
+        <SkillsEditor selected={p.skills} allSkills={state.skills} onChange={skills => setP({ ...p, skills })} onAddSkill={state.addSkill} />
+      </Field>
     </Drawer>
   )
 }
