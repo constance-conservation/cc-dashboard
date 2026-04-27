@@ -1,7 +1,9 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { Icon } from '@/components/icons/Icon'
+import { Select } from '@/components/dashboard/Select'
 
 type PillVariant = 'accent' | 'warn' | 'ok' | 'danger'
 
@@ -27,7 +29,15 @@ const SITE_COUNTS: [string, number][] = [
   ['Harrington Grove', 14], ['Liverpool', 11], ['Camden', 9], ['Wollondilly', 5], ['AWP Reserve', 3],
 ]
 
+const REPORT_TYPE_OPTIONS = [
+  { value: '', label: 'All types' },
+  { value: 'daily', label: 'Daily' },
+  { value: 'incident', label: 'Incident' },
+  { value: 'survey', label: 'Survey' },
+]
+
 export default function ReportingPage() {
+  const [reportType, setReportType] = useState('')
   return (
     <div className="subpage">
       <div className="subpage-top">
@@ -44,12 +54,7 @@ export default function ReportingPage() {
           <div>
             <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center' }}>
               <input className="input" placeholder="Search reports, authors, sites…" style={{ flex: 1 }} />
-              <select className="select">
-                <option>All types</option>
-                <option>Daily</option>
-                <option>Incident</option>
-                <option>Survey</option>
-              </select>
+              <Select value={reportType} onChange={setReportType} options={REPORT_TYPE_OPTIONS} style={{ minWidth: 130 }} />
               <button className="btn"><Icon name="download" size={14} /> Export</button>
             </div>
 

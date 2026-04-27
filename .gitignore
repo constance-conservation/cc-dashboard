@@ -1,5 +1,6 @@
-# Claude Code settings
-.claude/
+# Claude Code — ignore local settings and worktrees, track commands
+.claude/settings.local.json
+.claude/worktrees/
 
 # Design handoff (prototype source — not production code)
 Constance Conservation-handoff/

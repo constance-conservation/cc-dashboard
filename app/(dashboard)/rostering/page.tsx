@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer } from '@/components/dashboard/Drawer'
+import { Select } from '@/components/dashboard/Select'
+import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import type { RosterAssignment, Project, Employee } from '@/lib/types'
 
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
@@ -180,9 +182,7 @@ function DayEditor({ day, ym, state, onClose }: { day: number; ym: string; state
                 <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{emp.role}</div>
               </div>
-              <select className="select" value={a.projectId} onChange={e => changeProject(a.employeeId, e.target.value)} style={{ fontSize: 12, maxWidth: 180 }}>
-                {activeProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+              <Select value={a.projectId} onChange={v => changeProject(a.employeeId, v)} options={activeProjects.map(p => ({ value: p.id, label: p.name }))} style={{ fontSize: 12, maxWidth: 180 }} />
               {canOT && (
                 <input className="input" placeholder="OT hrs" type="number" value={a.overtimeHours || ''} onChange={e => toggleOvertime(a.employeeId, Number(e.target.value) || 0)} style={{ width: 70, fontSize: 12 }} />
               )}
@@ -201,10 +201,7 @@ function DayEditor({ day, ym, state, onClose }: { day: number; ym: string; state
               <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{emp.role} · {emp.skills.slice(0, 2).join(', ')}</div>
             </div>
-            <select className="select" onChange={e => { if (e.target.value) addTo(emp.id, e.target.value) }} defaultValue="" style={{ fontSize: 12, maxWidth: 200 }}>
-              <option value="">+ Add to project…</option>
-              {activeProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            <Select value="" placeholder="+ Add to project…" onChange={v => { if (v) addTo(emp.id, v) }} options={activeProjects.map(p => ({ value: p.id, label: p.name }))} style={{ fontSize: 12, maxWidth: 200 }} />
           </div>
         ))}
         {unassignedAvailable.length === 0 && <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>All available staff are assigned.</div>}
@@ -248,6 +245,7 @@ export default function RosteringPage() {
   const [selectedDay, setSelectedDay] = useState<number | null>(null)
   const [showHelp, setShowHelp] = useState(false)
   const [isDark, setIsDark] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<'autogen' | 'clear' | null>(null)
 
   useEffect(() => {
     setIsDark(document.documentElement.getAttribute('data-mode') === 'dark')
@@ -285,20 +283,22 @@ export default function RosteringPage() {
     return { totalShifts, uniqueStaff: uniqueStaff.size, projectVisits }
   }, [state.roster, state.rosterMonth, state.projects])
 
-  const handleAutoGen = () => {
-    if (!confirm(`Auto-generate roster for ${monthName}? This will replace any existing assignments for this month.`)) return
-    const generated = autoGenerate(state)
-    const newRoster = { ...state.roster }
-    Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
-    Object.assign(newRoster, generated)
-    state.setRoster(newRoster)
-  }
+  const handleAutoGen = () => setConfirmAction('autogen')
+  const handleClear = () => setConfirmAction('clear')
 
-  const handleClear = () => {
-    if (!confirm(`Clear all assignments for ${monthName}?`)) return
-    const newRoster = { ...state.roster }
-    Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
-    state.setRoster(newRoster)
+  const handleConfirmAction = () => {
+    if (confirmAction === 'autogen') {
+      const generated = autoGenerate(state)
+      const newRoster = { ...state.roster }
+      Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
+      Object.assign(newRoster, generated)
+      state.setRoster(newRoster)
+    } else if (confirmAction === 'clear') {
+      const newRoster = { ...state.roster }
+      Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
+      state.setRoster(newRoster)
+    }
+    setConfirmAction(null)
   }
 
   const prevMonth = () => {
@@ -387,6 +387,25 @@ export default function RosteringPage() {
 
       {selectedDay && <DayEditor day={selectedDay} ym={state.rosterMonth} state={state} onClose={() => setSelectedDay(null)} />}
       {showHelp && <RulesModal onClose={() => setShowHelp(false)} />}
+      {confirmAction === 'autogen' && (
+        <ConfirmDialog
+          title={`Auto-generate ${monthName}?`}
+          message="This will replace all existing assignments for this month with an automatically generated roster. Any manual changes will be lost."
+          confirmLabel="Auto-generate"
+          onConfirm={handleConfirmAction}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
+      {confirmAction === 'clear' && (
+        <ConfirmDialog
+          title={`Clear ${monthName}?`}
+          message="All roster assignments for this month will be permanently removed. This cannot be undone."
+          confirmLabel="Clear month"
+          danger
+          onConfirm={handleConfirmAction}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
     </div>
   )
 }

@@ -61,6 +61,7 @@ export type Roster = Record<string, RosterAssignment[]>
 export type CCState = {
   projects: Project[]
   employees: Employee[]
+  archivedEmployees: Employee[]
   skills: string[]
   roles: string[]
   tasks: Task[]
@@ -69,15 +70,53 @@ export type CCState = {
 }
 
 export type Vehicle = {
-  reg: string
+  id: string
+  registration: string
   make: string
+  model: string
   type: string
-  driver: string
-  loc: string
   status: VehicleStatus
-  km: number
-  service: string
-  lat: number
-  lng: number
-  speed: number
+  odometerKm: number
+  lastServiceDate: string | null
+  nextServiceDueKm: number | null
+  gpsLat: number | null
+  gpsLon: number | null
+  driverName: string | null
+  active: boolean
+}
+
+export type Invoice = {
+  id: string
+  invoiceNumber: string | null
+  client: string
+  amount: number
+  issueDate: string
+  dueDate: string | null
+  paidDate: string | null
+  status: string
+  description: string | null
+}
+
+export type InventoryItem = {
+  id: string
+  name: string
+  category: string
+  quantity: number
+  unit: string
+  minStock: number
+  location: string | null
+  notes: string | null
+  active: boolean
+}
+
+export type Tender = {
+  id: string
+  name: string
+  client: string
+  value: number
+  stage: string
+  dueDate: string | null
+  submittedDate: string | null
+  awardedDate: string | null
+  notes: string | null
 }

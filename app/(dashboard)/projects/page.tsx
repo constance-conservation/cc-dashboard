@@ -1,11 +1,24 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer, Field } from '@/components/dashboard/Drawer'
+import { Select } from '@/components/dashboard/Select'
+import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
+import { createClient } from '@/lib/supabase/client'
 import type { Project } from '@/lib/types'
+
+const PRIORITY_OPTIONS = [
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'low', label: 'Low' },
+]
+const UNIT_OPTIONS = [
+  { value: 'days', label: 'Days' },
+  { value: 'hours', label: 'Hours' },
+]
 
 function CapacityMeter({ label, pct, caption }: { label: string; pct: number; caption: string }) {
   const color = pct > 90 ? 'var(--danger)' : pct > 75 ? 'var(--warn)' : 'var(--accent)'
@@ -94,9 +107,21 @@ function ProjectCard({ project, state, onOpen }: { project: Project; state: Retu
 function ProjectDrawer({ projectId, state, onClose }: { projectId: string; state: ReturnType<typeof useCCState>; onClose: () => void }) {
   const p = state.projects.find(x => x.id === projectId)!
   const [edit, setEdit] = useState<Project>(p)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const save = () => { state.updateProject(p.id, edit); onClose() }
-  const del = () => { if (confirm(`Remove ${p.name}?`)) { state.deleteProject(p.id); onClose() } }
+  const del = () => setConfirmDelete(true)
   return (
+    <>
+    {confirmDelete && (
+      <ConfirmDialog
+        title={`Delete ${p.name}?`}
+        message={`This will permanently remove the project from the system. Any roster assignments to "${p.name}" will also be cleared.`}
+        confirmLabel="Delete project"
+        danger
+        onConfirm={() => { state.deleteProject(p.id); onClose() }}
+        onCancel={() => setConfirmDelete(false)}
+      />
+    )}
     <Drawer title={p.name} subtitle={p.client} onClose={onClose} onSave={save} onDelete={del}>
       <Field label="Project name"><input className="input" value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></Field>
       <Field label="Client"><input className="input" value={edit.client} onChange={e => setEdit({ ...edit, client: e.target.value })} /></Field>
@@ -106,14 +131,10 @@ function ProjectDrawer({ projectId, state, onClose }: { projectId: string; state
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Work unit">
-          <select className="select" value={edit.unit} onChange={e => setEdit({ ...edit, unit: e.target.value as 'days' | 'hours' })}>
-            <option value="days">Days</option><option value="hours">Hours</option>
-          </select>
+          <Select value={edit.unit} onChange={v => setEdit({ ...edit, unit: v as 'days' | 'hours' })} options={UNIT_OPTIONS} />
         </Field>
         <Field label="Priority">
-          <select className="select" value={edit.priority} onChange={e => setEdit({ ...edit, priority: e.target.value as Project['priority'] })}>
-            <option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option>
-          </select>
+          <Select value={edit.priority} onChange={v => setEdit({ ...edit, priority: v as Project['priority'] })} options={PRIORITY_OPTIONS} />
         </Field>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -138,25 +159,173 @@ function ProjectDrawer({ projectId, state, onClose }: { projectId: string; state
         <SkillsEditor selected={edit.skills} allSkills={state.skills} onChange={skills => setEdit({ ...edit, skills })} onAddSkill={state.addSkill} />
       </Field>
     </Drawer>
+    </>
   )
 }
 
 function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCState>; onClose: () => void }) {
-  const [p, setP] = useState<Omit<Project, 'id'>>({ name: '', client: '', start: '', end: '', unit: 'days', monthlyAllocation: 20, visitsPerMonth: 10, crewSize: 3, chargeOutRate: 1000, overtimeFlag: false, overtimeRate: 1.5, priority: 'medium', budget: 20000, spent: 0, skills: [] })
-  const save = () => { if (!p.name) return; state.addProject(p); onClose() }
+  const [p, setP] = useState<Omit<Project, 'id'>>({
+    name: '', client: '', start: '', end: '', unit: 'days',
+    monthlyAllocation: 0, visitsPerMonth: 0, crewSize: 3,
+    chargeOutRate: 0, overtimeFlag: false, overtimeRate: 1.5,
+    priority: 'medium', budget: 0, spent: 0, skills: [],
+  })
+  const [existingClients, setExistingClients] = useState<string[]>([])
+  const [newClient, setNewClient] = useState(false)
+  const [flexibleCrew, setFlexibleCrew] = useState(false)
+  const [clientOpen, setClientOpen] = useState(false)
+  const clientDropRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleOutsideClick(e: MouseEvent) {
+      if (clientDropRef.current && !clientDropRef.current.contains(e.target as Node)) {
+        setClientOpen(false)
+      }
+    }
+    if (clientOpen) document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [clientOpen])
+
+  useEffect(() => {
+    const supabase = createClient()
+    async function loadClients() {
+      const { data: org } = await supabase.from('organizations').select('id').limit(1).single()
+      if (!org) return
+      const { data: rows } = await supabase
+        .from('clients')
+        .select('name')
+        .eq('organization_id', (org as Record<string, unknown>).id as string)
+        .order('name')
+      setExistingClients((rows ?? []).map(r => (r as Record<string, unknown>).name as string))
+    }
+    loadClients()
+  }, [])
+
+  const save = () => {
+    if (!p.name.trim()) return
+    state.addProject({ ...p, crewSize: flexibleCrew ? 0 : p.crewSize })
+    onClose()
+  }
+
   return (
     <Drawer title="New project" subtitle="Add to projects list" onClose={onClose} onSave={save} saveLabel="Create">
-      <Field label="Project name"><input className="input" value={p.name} onChange={e => setP({ ...p, name: e.target.value })} autoFocus /></Field>
-      <Field label="Client"><input className="input" value={p.client} onChange={e => setP({ ...p, client: e.target.value })} /></Field>
+      <Field label="Project name">
+        <input className="input" value={p.name} onChange={e => setP({ ...p, name: e.target.value })} autoFocus />
+      </Field>
+
+      <Field label="Client">
+        {!newClient ? (
+          <div ref={clientDropRef} style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setClientOpen(o => !o)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 8,
+                background: 'var(--bg-elev)', fontSize: 13, cursor: 'pointer', textAlign: 'left',
+                color: p.client ? 'var(--ink)' : 'var(--ink-3)',
+                outline: clientOpen ? '2px solid var(--accent)' : 'none',
+                outlineOffset: -1,
+              }}
+            >
+              <span>{p.client || 'Select client…'}</span>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0, marginLeft: 8, opacity: 0.5, transform: clientOpen ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }}>
+                <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {clientOpen && (
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 100,
+                background: 'var(--bg-elev)', border: '1px solid var(--line)',
+                borderRadius: 10, boxShadow: '0 8px 24px oklch(0.18 0.015 150 / 0.12)', overflow: 'hidden',
+              }}>
+                {existingClients.map(c => (
+                  <button key={c} type="button" onClick={() => { setP({ ...p, client: c }); setClientOpen(false) }}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
+                      fontSize: 13, background: p.client === c ? 'var(--accent-soft)' : 'transparent',
+                      color: p.client === c ? 'var(--accent)' : 'var(--ink)', cursor: 'pointer',
+                      border: 'none', borderBottom: '1px solid var(--line)',
+                    }}
+                    onMouseEnter={e => { if (p.client !== c) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-sunken)' }}
+                    onMouseLeave={e => { if (p.client !== c) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                  >
+                    {c}
+                  </button>
+                ))}
+                <button type="button" onClick={() => { setNewClient(true); setP({ ...p, client: '' }); setClientOpen(false) }}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
+                    fontSize: 13, background: 'transparent', color: 'var(--accent)',
+                    cursor: 'pointer', border: 'none', fontWeight: 500,
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-soft)' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                >
+                  + New client…
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input className="input" style={{ flex: 1 }} placeholder="New client name…" value={p.client}
+              onChange={e => setP({ ...p, client: e.target.value })} autoFocus />
+            <button className="btn" type="button" onClick={() => { setNewClient(false); setP({ ...p, client: '' }) }}>Cancel</button>
+          </div>
+        )}
+      </Field>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <Field label="Unit">
-          <select className="select" value={p.unit} onChange={e => setP({ ...p, unit: e.target.value as 'days' | 'hours' })}>
-            <option value="days">Days</option><option value="hours">Hours</option>
-          </select>
-        </Field>
-        <Field label="Monthly allocation"><input className="input" type="number" value={p.monthlyAllocation} onChange={e => setP({ ...p, monthlyAllocation: +e.target.value })} /></Field>
+        <Field label="Start date"><input className="input" type="date" value={p.start} onChange={e => setP({ ...p, start: e.target.value })} /></Field>
+        <Field label="End date"><input className="input" type="date" value={p.end} onChange={e => setP({ ...p, end: e.target.value })} /></Field>
       </div>
-      <Field label="Budget"><input className="input" type="number" value={p.budget} onChange={e => setP({ ...p, budget: +e.target.value })} /></Field>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <Field label="Priority">
+          <Select value={p.priority} onChange={v => setP({ ...p, priority: v as Project['priority'] })} options={PRIORITY_OPTIONS} />
+        </Field>
+        <Field label="Work unit">
+          <Select value={p.unit} onChange={v => setP({ ...p, unit: v as 'days' | 'hours' })} options={UNIT_OPTIONS} />
+        </Field>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <Field label={`Monthly allocation (${p.unit})`}>
+          <input className="input" type="number" value={p.monthlyAllocation} onChange={e => setP({ ...p, monthlyAllocation: +e.target.value })} />
+        </Field>
+        <Field label="Visits per month">
+          <input className="input" type="number" value={p.visitsPerMonth} onChange={e => setP({ ...p, visitsPerMonth: +e.target.value })} />
+        </Field>
+      </div>
+
+      <Field label="Crew size">
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <input type="checkbox" checked={flexibleCrew} onChange={e => setFlexibleCrew(e.target.checked)} />
+            Flexible
+          </label>
+          {!flexibleCrew && (
+            <>
+              <input className="input" type="number" min="1" value={p.crewSize} onChange={e => setP({ ...p, crewSize: +e.target.value })} style={{ width: 80 }} />
+              <span style={{ fontSize: 12, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>fixed staff per day</span>
+            </>
+          )}
+        </div>
+      </Field>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <Field label={`Charge-out rate ($ per ${p.unit === 'hours' ? 'hr' : 'day'})`}>
+          <input className="input" type="number" value={p.chargeOutRate} onChange={e => setP({ ...p, chargeOutRate: +e.target.value })} />
+        </Field>
+        <Field label="Budget ($)">
+          <input className="input" type="number" value={p.budget} onChange={e => setP({ ...p, budget: +e.target.value })} />
+        </Field>
+      </div>
+
+      <Field label="Required skills">
+        <SkillsEditor selected={p.skills} allSkills={state.skills} onChange={skills => setP({ ...p, skills })} onAddSkill={state.addSkill} />
+      </Field>
     </Drawer>
   )
 }
@@ -166,13 +335,20 @@ export default function ProjectsPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [view, setView] = useState<'grid' | 'table'>('grid')
+  const [filter, setFilter] = useState('')
+
+  const visible = state.projects.filter(p =>
+    !filter ||
+    p.name.toLowerCase().includes(filter.toLowerCase()) ||
+    p.client.toLowerCase().includes(filter.toLowerCase())
+  )
 
   return (
     <div className="subpage">
       <div className="subpage-top">
         <Link href="/" className="back-btn"><Icon name="back" size={16} /> Dashboard</Link>
         <div style={{ width: 1, height: 20, background: 'var(--line)' }} />
-        <span className="sp-crumb">{state.projects.length} active projects · capacity & budget</span>
+        <span className="sp-crumb">{visible.length} of {state.projects.length} projects · capacity & budget</span>
         <div style={{ flex: 1 }} />
         <h2 className="sp-title">Projects</h2>
       </div>
@@ -185,12 +361,12 @@ export default function ProjectsPage() {
             <div className={`tab ${view === 'table' ? 'active' : ''}`} onClick={() => setView('table')}>Table</div>
           </div>
           <div style={{ flex: 1 }} />
-          <input className="input" placeholder="Search projects…" style={{ width: 240 }} />
+          <input className="input" placeholder="Search projects…" value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 240 }} />
         </div>
 
         {view === 'grid' ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
-            {state.projects.map(p => <ProjectCard key={p.id} project={p} state={state} onOpen={() => setSelected(p.id)} />)}
+            {visible.map(p => <ProjectCard key={p.id} project={p} state={state} onOpen={() => setSelected(p.id)} />)}
           </div>
         ) : (
           <table className="table">
@@ -198,7 +374,7 @@ export default function ProjectsPage() {
               <th>Project</th><th>Client</th><th>Unit</th><th>Allocation</th><th>Crew</th><th>Budget</th><th>Spent</th><th>Priority</th>
             </tr></thead>
             <tbody>
-              {state.projects.map(p => {
+              {visible.map(p => {
                 const pct = Math.round((p.spent / p.budget) * 100)
                 return (
                   <tr key={p.id} onClick={() => setSelected(p.id)} style={{ cursor: 'pointer' }}>

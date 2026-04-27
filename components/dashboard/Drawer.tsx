@@ -9,10 +9,12 @@ type DrawerProps = {
   onClose: () => void
   onSave?: () => void
   onDelete?: () => void
+  onArchive?: () => void
+  onRestore?: () => void
   saveLabel?: string
 }
 
-export function Drawer({ title, subtitle, children, onClose, onSave, onDelete, saveLabel = 'Save' }: DrawerProps) {
+export function Drawer({ title, subtitle, children, onClose, onSave, onDelete, onArchive, onRestore, saveLabel = 'Save' }: DrawerProps) {
   return (
     <div className="drawer-backdrop" onClick={onClose}>
       <div className="drawer" onClick={e => e.stopPropagation()}>
@@ -28,6 +30,16 @@ export function Drawer({ title, subtitle, children, onClose, onSave, onDelete, s
           {onDelete && (
             <button className="btn" onClick={onDelete} style={{ color: 'var(--danger)' }}>
               <Icon name="trash" size={12} /> Delete
+            </button>
+          )}
+          {onArchive && (
+            <button className="btn" onClick={onArchive} style={{ color: 'var(--ink-3)' }}>
+              <Icon name="archive" size={12} /> Archive
+            </button>
+          )}
+          {onRestore && (
+            <button className="btn" onClick={onRestore} style={{ color: 'var(--accent)' }}>
+              <Icon name="unarchive" size={12} /> Restore
             </button>
           )}
           <div style={{ flex: 1 }} />
