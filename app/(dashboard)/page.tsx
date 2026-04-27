@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
+import { createClient } from '@/lib/supabase/client'
 
 // ── App definitions ────────────────────────────────────────────
 const APPS = [
@@ -18,6 +19,31 @@ const APPS = [
 
 type AppStats = Record<string, { statVal?: string | number; stat?: string; badge?: string | null; badgeKind?: string }>
 
+type HomeSummary = {
+  outstandingAmount: number
+  outstandingCount: number
+  ytdRevenue: number
+  liveTenders: number
+  livePipeline: number
+  nextTenderDeadline: string | null
+  totalVehicles: number
+  inServiceVehicles: number
+  serviceDue: boolean
+}
+
+// ── Helpers ────────────────────────────────────────────────────
+function fmt(n: number): string {
+  if (n >= 1000000) return `$${(n / 1000000).toFixed(1)}m`
+  if (n >= 1000) return `$${Math.round(n / 1000)}k`
+  return `$${n}`
+}
+
+function nextDueLabel(dateStr: string | null): string | null {
+  if (!dateStr) return null
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  return `Due ${days[new Date(dateStr).getDay()]}`
+}
+
 // ── Sparkline ─────────────────────────────────────────────────
 function Spark({ data, color }: { data: number[]; color?: string }) {
   const w = 120, h = 28
@@ -31,28 +57,7 @@ function Spark({ data, color }: { data: number[]; color?: string }) {
   )
 }
 
-// ── KPI widgets ────────────────────────────────────────────────
-function TenderPipelineWidget() {
-  const actuals = [172, 186, 201, 194, 218, 232]
-  const predicted = 258
-  const lastMonth = actuals[actuals.length - 1]
-  const pctChange = ((predicted - lastMonth) / lastMonth) * 100
-  const up = pctChange >= 0
-  return (
-    <div className="kpi">
-      <div className="kpi-label">Predicted revenue — next month</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <div className="kpi-value">${predicted}k</div>
-        <div style={{ fontSize: 13, color: up ? 'var(--ok)' : 'var(--danger)', fontWeight: 500 }}>
-          {up ? '▲' : '▼'} {Math.abs(pctChange).toFixed(1)}%
-        </div>
-      </div>
-      <div className="kpi-delta">{up ? 'Higher' : 'Lower'} than last month (${lastMonth}k)</div>
-      <div className="kpi-spark"><Spark data={[...actuals, predicted]} /></div>
-    </div>
-  )
-}
-
+// ── Weather widget (placeholder — pending weather API) ─────────
 function WeatherWidget() {
   const forecast = [
     ['Mon', '21°', '☀'], ['Tue', '23°', '☀'], ['Wed', '19°', '⛅'],
@@ -156,6 +161,59 @@ type Layout = 'grid' | 'list' | 'compact'
 export default function DashboardPage() {
   const state = useCCState()
   const [layout, setLayout] = useState<Layout>('grid')
+  const [summary, setSummary] = useState<HomeSummary | null>(null)
+
+  useEffect(() => {
+    const supabase = createClient()
+    async function loadSummary() {
+      const { data: org } = await supabase.from('organizations').select('id').limit(1).single()
+      if (!org) return
+      const oid = (org as Record<string, unknown>).id as string
+
+      const today = new Date().toISOString().slice(0, 10)
+      const currentYear = today.slice(0, 4)
+
+      const [{ data: invoiceRows }, { data: tenderRows }, { data: vehicleRows }] = await Promise.all([
+        supabase.from('invoices').select('amount, status, paid_date').eq('organization_id', oid),
+        supabase.from('tenders').select('stage, due_date, value').eq('organization_id', oid),
+        supabase.from('vehicles').select('status').eq('organization_id', oid).eq('active', true),
+      ])
+
+      const invoices = (invoiceRows ?? []) as Array<{ amount: number; status: string; paid_date: string | null }>
+      const tenders  = (tenderRows  ?? []) as Array<{ stage: string; due_date: string | null; value: number }>
+      const vehicles = (vehicleRows ?? []) as Array<{ status: string }>
+
+      const outstanding = invoices.filter(i => i.status !== 'paid' && i.status !== 'cancelled')
+      const outstandingAmount = outstanding.reduce((s, i) => s + i.amount, 0)
+
+      const paid = invoices.filter(i => i.status === 'paid' && i.paid_date)
+      const ytdRevenue = paid.filter(i => i.paid_date!.startsWith(currentYear)).reduce((s, i) => s + i.amount, 0)
+
+      const deadStages = new Set(['awarded', 'not selected', 'unsuccessful', 'declined'])
+      const liveTenders = tenders.filter(t => !deadStages.has(t.stage.toLowerCase()))
+      const livePipeline = liveTenders.reduce((s, t) => s + t.value, 0)
+      const nextTenderDeadline = liveTenders
+        .filter(t => t.due_date && t.due_date >= today)
+        .sort((a, b) => a.due_date!.localeCompare(b.due_date!))[0]?.due_date ?? null
+
+      const totalVehicles   = vehicles.length
+      const inServiceVehicles = vehicles.filter(v => v.status !== 'danger').length
+      const serviceDue      = vehicles.some(v => v.status === 'danger' || v.status === 'warn')
+
+      setSummary({
+        outstandingAmount,
+        outstandingCount: outstanding.length,
+        ytdRevenue,
+        liveTenders: liveTenders.length,
+        livePipeline,
+        nextTenderDeadline,
+        totalVehicles,
+        inServiceVehicles,
+        serviceDue,
+      })
+    }
+    loadSummary().catch(console.error)
+  }, [])
 
   const today = new Date().toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })
   const hour = new Date().getHours()
@@ -184,13 +242,26 @@ export default function DashboardPage() {
     : `${onShiftToday} staff across ${activeSites} site${activeSites !== 1 ? 's' : ''} today.`
 
   const stats: AppStats = {
-    roster: { statVal: onShiftToday, stat: 'on shift', badge: null },
-    projects: { statVal: state.projects.length, stat: 'active', badge: null },
-    employees: { statVal: state.employees.length, stat: 'team', badge: null },
-    tender: { statVal: '7', stat: 'active', badge: 'Due Fri' },
-    staff: { statVal: '12', stat: 'reports', badge: '2 new' },
-    finance: { statVal: '$84.2k', stat: 'outstanding', badge: null },
-    fleet: { statVal: '14 / 16', stat: 'in service', badge: 'Service due', badgeKind: 'alert' },
+    roster:   { statVal: onShiftToday, stat: ' on shift', badge: null },
+    projects: { statVal: state.projects.length, stat: ' active', badge: null },
+    employees: { statVal: state.employees.length, stat: ' team', badge: null },
+    tender: {
+      statVal:  summary?.liveTenders ?? '—',
+      stat:     ' active',
+      badge:    summary ? nextDueLabel(summary.nextTenderDeadline) : null,
+    },
+    staff:   { statVal: '—', stat: ' reports', badge: null },
+    finance: {
+      statVal: summary ? fmt(summary.outstandingAmount) : '—',
+      stat:    ' outstanding',
+      badge:   null,
+    },
+    fleet: {
+      statVal:   summary ? `${summary.inServiceVehicles} / ${summary.totalVehicles}` : '—',
+      stat:      ' in service',
+      badge:     summary?.serviceDue ? 'Service due' : null,
+      badgeKind: 'alert',
+    },
   }
 
   const LayoutComp = layout === 'list' ? <AppListRows stats={stats} /> : layout === 'compact' ? <AppCompactGrid /> : <AppGridCards stats={stats} />
@@ -210,8 +281,8 @@ export default function DashboardPage() {
           </h1>
           <div className="hero-meta">
             <div><span className="label">On shift today</span><span className="val">{onShiftToday > 0 ? `${onShiftToday} staff across ${activeSites} site${activeSites !== 1 ? 's' : ''}` : 'No crew rostered'}</span></div>
-            <div><span className="label">Weather — Camden</span><span className="val">19° · light winds</span></div>
             <div><span className="label">Active projects</span><span className="val">{state.projects.length} running</span></div>
+            <div><span className="label">Outstanding invoices</span><span className="val">{summary ? fmt(summary.outstandingAmount) : '—'}</span></div>
           </div>
         </div>
       </div>
@@ -220,19 +291,26 @@ export default function DashboardPage() {
       <div className="content">
         {/* KPI row */}
         <div className="kpi-row">
-          <TenderPipelineWidget />
+          <div className="kpi">
+            <div className="kpi-label">Live tender pipeline</div>
+            <div className="kpi-value">{summary ? fmt(summary.livePipeline) : '—'}</div>
+            <div className="kpi-delta">{summary ? `${summary.liveTenders} active tender${summary.liveTenders !== 1 ? 's' : ''}` : ''}</div>
+            <div className="kpi-spark"><Spark data={[0, 0]} /></div>
+          </div>
           <WeatherWidget />
           <div className="kpi">
-            <div className="kpi-label">Tender pipeline — Q2</div>
-            <div className="kpi-value">$1.4m</div>
-            <div className="kpi-delta">7 live · 3 awaiting</div>
-            <div className="kpi-spark"><Spark data={[0.8, 0.9, 1.0, 1.1, 1.2, 1.35, 1.4]} /></div>
+            <div className="kpi-label">YTD revenue</div>
+            <div className="kpi-value">{summary ? fmt(summary.ytdRevenue) : '—'}</div>
+            <div className="kpi-delta">Paid invoices — {new Date().getFullYear()}</div>
+            <div className="kpi-spark"><Spark data={[0, 0]} /></div>
           </div>
           <div className="kpi">
             <div className="kpi-label">Outstanding invoices</div>
-            <div className="kpi-value">$84.2k</div>
-            <div className="kpi-delta down">6 invoices · 2 overdue</div>
-            <div className="kpi-spark"><Spark data={[92, 88, 90, 85, 88, 86, 84]} /></div>
+            <div className="kpi-value" style={{ color: summary && summary.outstandingAmount > 0 ? 'var(--warn)' : undefined }}>
+              {summary ? fmt(summary.outstandingAmount) : '—'}
+            </div>
+            <div className="kpi-delta">{summary ? `${summary.outstandingCount} invoice${summary.outstandingCount !== 1 ? 's' : ''} unpaid` : ''}</div>
+            <div className="kpi-spark"><Spark data={[0, 0]} /></div>
           </div>
         </div>
 
