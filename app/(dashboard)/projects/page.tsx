@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
@@ -152,6 +152,18 @@ function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCSta
   const [existingClients, setExistingClients] = useState<string[]>([])
   const [newClient, setNewClient] = useState(false)
   const [flexibleCrew, setFlexibleCrew] = useState(false)
+  const [clientOpen, setClientOpen] = useState(false)
+  const clientDropRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleOutsideClick(e: MouseEvent) {
+      if (clientDropRef.current && !clientDropRef.current.contains(e.target as Node)) {
+        setClientOpen(false)
+      }
+    }
+    if (clientOpen) document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [clientOpen])
 
   useEffect(() => {
     const supabase = createClient()
@@ -182,15 +194,57 @@ function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCSta
 
       <Field label="Client">
         {!newClient ? (
-          <div style={{ display: 'flex', gap: 6 }}>
-            <select className="select" style={{ flex: 1 }} value={p.client} onChange={e => {
-              if (e.target.value === '__new__') { setNewClient(true); setP({ ...p, client: '' }) }
-              else setP({ ...p, client: e.target.value })
-            }}>
-              <option value="">Select client…</option>
-              {existingClients.map(c => <option key={c} value={c}>{c}</option>)}
-              <option value="__new__">+ New client…</option>
-            </select>
+          <div ref={clientDropRef} style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setClientOpen(o => !o)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 8,
+                background: 'var(--bg-elev)', fontSize: 13, cursor: 'pointer', textAlign: 'left',
+                color: p.client ? 'var(--ink)' : 'var(--ink-3)',
+                outline: clientOpen ? '2px solid var(--accent)' : 'none',
+                outlineOffset: -1,
+              }}
+            >
+              <span>{p.client || 'Select client…'}</span>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0, marginLeft: 8, opacity: 0.5, transform: clientOpen ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }}>
+                <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {clientOpen && (
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 100,
+                background: 'var(--bg-elev)', border: '1px solid var(--line)',
+                borderRadius: 10, boxShadow: '0 8px 24px oklch(0.18 0.015 150 / 0.12)', overflow: 'hidden',
+              }}>
+                {existingClients.map(c => (
+                  <button key={c} type="button" onClick={() => { setP({ ...p, client: c }); setClientOpen(false) }}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
+                      fontSize: 13, background: p.client === c ? 'var(--accent-soft)' : 'transparent',
+                      color: p.client === c ? 'var(--accent)' : 'var(--ink)', cursor: 'pointer',
+                      border: 'none', borderBottom: '1px solid var(--line)',
+                    }}
+                    onMouseEnter={e => { if (p.client !== c) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-sunken)' }}
+                    onMouseLeave={e => { if (p.client !== c) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                  >
+                    {c}
+                  </button>
+                ))}
+                <button type="button" onClick={() => { setNewClient(true); setP({ ...p, client: '' }); setClientOpen(false) }}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
+                    fontSize: 13, background: 'transparent', color: 'var(--accent)',
+                    cursor: 'pointer', border: 'none', fontWeight: 500,
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-soft)' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                >
+                  + New client…
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 6 }}>
