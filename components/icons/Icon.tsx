@@ -3,7 +3,7 @@ type IconName =
   | 'employees' | 'projects' | 'tasks' | 'back' | 'arrow'
   | 'search' | 'bell' | 'settings' | 'close' | 'x'
   | 'plus' | 'filter' | 'download' | 'check' | 'trash'
-  | 'edit' | 'cloud' | 'archive' | 'unarchive'
+  | 'edit' | 'cloud' | 'archive' | 'unarchive' | 'lock'
 
 type IconProps = {
   name: IconName
@@ -37,6 +37,7 @@ export function Icon({ name, size = 20 }: IconProps) {
     archive: <><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 13h4"/></>,
     unarchive: <><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M12 17v-5M9.5 14.5l2.5-3 2.5 3"/></>,
     inventory: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12"/></>,
+    lock: <><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>,
   }
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">

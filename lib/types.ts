@@ -137,6 +137,7 @@ export type CCState = {
   sites: Site[]
   activityTypes: ActivityType[]
   activities: Activity[]
+  carryovers: ActivityCarryover[]
   employees: Employee[]
   archivedEmployees: Employee[]
   skills: string[]

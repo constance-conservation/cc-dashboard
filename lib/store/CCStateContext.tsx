@@ -2,9 +2,9 @@
 
 import { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react'
 import type {
-  CCState, Project, Site, ActivityType, Activity,
+  CCState, Project, Site, ActivityType, Activity, ActivityCarryover,
   Employee, Task, Roster, RosterAssignment,
-  EmploymentType, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus,
+  EmploymentType, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus, CarryoverStatus,
 } from '@/lib/types'
 import { createClient } from '@/lib/supabase/client'
 
@@ -58,6 +58,18 @@ function rowToActivityType(r: Record<string, unknown>): ActivityType {
     id: r.id as string,
     name: (r.name as string) ?? '',
     description: (r.description as string) || undefined,
+  }
+}
+
+function rowToCarryover(r: Record<string, unknown>): ActivityCarryover {
+  return {
+    id: r.id as string,
+    activityId: r.activity_id as string,
+    originalDateKey: r.original_date_key as string,
+    unitsMissed: (r.units_missed as number) ?? 1,
+    status: ((r.status as string) ?? 'pending') as CarryoverStatus,
+    reviewDate: (r.review_date as string) || undefined,
+    createdAt: r.created_at as string,
   }
 }
 
@@ -164,6 +176,9 @@ type CCActions = {
   addActivity:      (a: Omit<Activity, 'id'>) => void
   updateActivity:   (id: string, patch: Partial<Activity>) => void
   deleteActivity:   (id: string) => void
+  // Carryovers
+  addCarryovers:    (items: Omit<ActivityCarryover, 'id' | 'createdAt'>[]) => Promise<void>
+  updateCarryover:  (id: string, status: CarryoverStatus) => void
   // Employees
   updateEmployee:   (id: string, patch: Partial<Employee>) => void
   addEmployee:      (e: Omit<Employee, 'id'>) => void
@@ -196,7 +211,7 @@ type CCContext = CCState & CCActions
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const EMPTY_STATE: CCState = {
-  projects: [], sites: [], activityTypes: [], activities: [],
+  projects: [], sites: [], activityTypes: [], activities: [], carryovers: [],
   employees: [], archivedEmployees: [], skills: [], roles: [],
   tasks: [], roster: {}, rosterMonth: new Date().toISOString().slice(0, 7),
 }
@@ -259,6 +274,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         { data: siteRows },
         { data: activityTypeRows },
         { data: activityRows },
+        { data: carryoverRows },
         { data: skillRows },
         { data: roleRows },
         { data: taskRows },
@@ -288,6 +304,12 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           .select('*')
           .eq('organization_id', oid)
           .order('sort_order'),
+        supabase
+          .from('activity_carryovers')
+          .select('*')
+          .eq('organization_id', oid)
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false }),
         supabase
           .from('skills')
           .select('name')
@@ -335,6 +357,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         sites:             (siteRows         ?? []).map(r => rowToSite(r        as Record<string, unknown>)),
         activityTypes:     (activityTypeRows ?? []).map(r => rowToActivityType(r as Record<string, unknown>)),
         activities:        (activityRows     ?? []).map(r => rowToActivity(r    as Record<string, unknown>)),
+        carryovers:        (carryoverRows    ?? []).map(r => rowToCarryover(r   as Record<string, unknown>)),
         skills:            (skillRows        ?? []).map(r => (r as Record<string, unknown>).name as string),
         roles:             (roleRows         ?? []).map(r => (r as Record<string, unknown>).name as string),
         tasks:             (taskRows         ?? []).map(r => {
@@ -576,6 +599,60 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .delete()
         .eq('id', id)
         .then(({ error }) => { if (error) console.error('deleteActivity:', error) })
+    }
+
+    // ── Carryovers ─────────────────────────────────────────────
+
+    async function addCarryovers(items: Omit<ActivityCarryover, 'id' | 'createdAt'>[]) {
+      if (items.length === 0) return
+      const { orgId: oid } = ref()
+      const now = new Date().toISOString()
+      const tempItems: ActivityCarryover[] = items.map((item, i) => ({
+        ...item,
+        id: `temp-${Date.now()}-${i}`,
+        createdAt: now,
+      }))
+      setState(prev => ({ ...prev, carryovers: [...prev.carryovers, ...tempItems] }))
+
+      const rows = items.map(item => ({
+        organization_id:   oid,
+        activity_id:       item.activityId,
+        original_date_key: item.originalDateKey,
+        units_missed:      item.unitsMissed,
+        status:            item.status,
+        review_date:       item.reviewDate ?? null,
+      }))
+      const { data: inserted, error } = await db
+        .from('activity_carryovers')
+        .insert(rows)
+        .select('id')
+
+      if (error || !inserted) {
+        console.error('addCarryovers:', error)
+        const tempIds = new Set(tempItems.map(t => t.id))
+        setState(prev => ({ ...prev, carryovers: prev.carryovers.filter(c => !tempIds.has(c.id)) }))
+        return
+      }
+
+      const realIds = (inserted as Record<string, unknown>[]).map(r => r.id as string)
+      setState(prev => ({
+        ...prev,
+        carryovers: prev.carryovers.map(c => {
+          const i = tempItems.findIndex(t => t.id === c.id)
+          return i >= 0 ? { ...c, id: realIds[i] } : c
+        }),
+      }))
+    }
+
+    function updateCarryover(id: string, status: CarryoverStatus) {
+      setState(prev => ({
+        ...prev,
+        carryovers: prev.carryovers.map(c => c.id === id ? { ...c, status } : c),
+      }))
+      db.from('activity_carryovers')
+        .update({ status })
+        .eq('id', id)
+        .then(({ error }) => { if (error) console.error('updateCarryover:', error) })
     }
 
     // ── Employees ──────────────────────────────────────────────
@@ -911,6 +988,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       addActivity,
       updateActivity,
       deleteActivity,
+      addCarryovers,
+      updateCarryover,
       updateEmployee,
       addEmployee,
       deleteEmployee,
