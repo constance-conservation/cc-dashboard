@@ -444,7 +444,6 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       const { data: inserted, error } = await db
         .from('client_contracts')
         .insert({
-          organization_id:     oid,
           client_id:           clientId,
           contract_name:       p.name,
           contract_start_date: p.start || null,
