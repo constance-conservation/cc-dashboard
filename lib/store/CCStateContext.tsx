@@ -50,6 +50,7 @@ function rowToSite(r: Record<string, unknown>): Site {
     notes: (r.notes as string) || undefined,
     active: (r.active as boolean) ?? true,
     sortOrder: (r.sort_order as number) ?? 0,
+    clientId: (r.client_id as string) || undefined,
   }
 }
 
@@ -151,10 +152,11 @@ function contractPatch(p: Partial<Project>): Record<string, unknown> {
 
 function sitePatch(s: Partial<Site>): Record<string, unknown> {
   const row: Record<string, unknown> = {}
-  if (s.name !== undefined)      row.name       = s.name
-  if (s.notes !== undefined)     row.notes      = s.notes
-  if (s.active !== undefined)    row.active     = s.active
+  if (s.name !== undefined)     row.name      = s.name
+  if (s.notes !== undefined)    row.notes     = s.notes
+  if (s.active !== undefined)   row.active    = s.active
   if (s.sortOrder !== undefined) row.sort_order = s.sortOrder
+  if (s.clientId !== undefined) row.client_id = s.clientId ?? null
   return row
 }
 
@@ -201,12 +203,13 @@ function clientPatch(c: Partial<Client>): Record<string, unknown> {
 type CCActions = {
   // Projects
   updateProject:    (id: string, patch: Partial<Project>) => void
-  addProject:       (p: Omit<Project, 'id'>) => Promise<string | null>
+  addProject:       (p: Omit<Project, 'id'>) => Promise<{ id: string } | string>
   deleteProject:    (id: string) => void
   archiveProject:   (id: string) => void
   restoreProject:   (id: string) => void
   // Sites
-  createAndLinkSite: (projectId: string, name: string, notes?: string) => void
+  createSiteForClient: (clientId: string, name: string, notes?: string) => Promise<string | null>
+  createAndLinkSite: (projectId: string, name: string, notes?: string, clientId?: string) => void
   linkSite:          (projectId: string, siteId: string) => void
   unlinkSite:        (projectId: string, siteId: string) => void
   updateSite:        (id: string, patch: Partial<Site>) => void
@@ -343,7 +346,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           .eq('clients.organization_id', oid),
         supabase
           .from('sites')
-          .select('id, name, notes, active, sort_order')
+          .select('id, name, notes, active, sort_order, client_id')
           .eq('organization_id', oid)
           .order('name'),
         supabase
@@ -458,7 +461,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .then(({ error }) => { if (error) console.error('updateProject:', error) })
     }
 
-    async function addProject(p: Omit<Project, 'id'>): Promise<string | null> {
+    async function addProject(p: Omit<Project, 'id'>): Promise<{ id: string } | string> {
       const { orgId: oid } = ref()
 
       // Find or create client by name
@@ -509,9 +512,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       }
 
       const realId = (inserted as Record<string, unknown>).id as string
-      const newProject: Project = { id: realId, ...p }
-      setState(prev => ({ ...prev, projects: [...prev.projects, newProject] }))
-      return null  // null = success
+      setState(prev => ({ ...prev, projects: [...prev.projects, { id: realId, ...p }] }))
+      return { id: realId }
     }
 
     function deleteProject(id: string) {
@@ -551,10 +553,30 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
 
     // ── Sites ──────────────────────────────────────────────────
 
-    async function createAndLinkSite(projectId: string, name: string, notes?: string) {
+    async function createSiteForClient(clientId: string, name: string, notes?: string): Promise<string | null> {
+      const { orgId: oid } = ref()
+      const { data: inserted, error } = await db
+        .from('sites')
+        .insert({ organization_id: oid, client_id: clientId, name, notes: notes ?? null, active: true, sort_order: 0 })
+        .select('id')
+        .single()
+      if (error || !inserted) {
+        console.error('createSiteForClient:', error)
+        return error?.message ?? 'Unknown error'
+      }
+      const realId = (inserted as Record<string, unknown>).id as string
+      setState(prev => ({
+        ...prev,
+        sites: [...prev.sites, { id: realId, name, notes, active: true, sortOrder: 0, clientId }]
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      }))
+      return null
+    }
+
+    async function createAndLinkSite(projectId: string, name: string, notes?: string, clientId?: string) {
       const { orgId: oid } = ref()
       const tempSiteId = 'temp-' + Date.now()
-      const optimisticSite: Site = { id: tempSiteId, name, notes, active: true, sortOrder: 0 }
+      const optimisticSite: Site = { id: tempSiteId, name, notes, active: true, sortOrder: 0, clientId }
       const optimisticLink: ProjectSiteLink = { projectId, siteId: tempSiteId, sortOrder: 0 }
       setState(prev => ({
         ...prev,
@@ -564,7 +586,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
 
       const { data: inserted, error } = await db
         .from('sites')
-        .insert({ organization_id: oid, name, notes: notes ?? null, active: true, sort_order: 0 })
+        .insert({ organization_id: oid, client_id: clientId ?? null, name, notes: notes ?? null, active: true, sort_order: 0 })
         .select('id')
         .single()
 
@@ -1214,16 +1236,28 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .then(({ error }) => { if (error) console.error('restoreClient:', error) })
     }
 
-    function deleteClient(id: string) {
+    async function deleteClient(id: string) {
+      const { clients, archivedClients } = ref()
+      const client = [...clients, ...archivedClients].find(c => c.id === id)
+      const clientName = client?.name ?? ''
       setState(prev => ({
         ...prev,
         clients:         prev.clients.filter(c => c.id !== id),
         archivedClients: prev.archivedClients.filter(c => c.id !== id),
+        projects:        prev.projects.map(p =>
+          p.client === clientName ? { ...p, client: '' } : p
+        ),
       }))
-      db.from('clients')
+      const { error: unlinkErr } = await db
+        .from('client_contracts')
+        .update({ client_id: null })
+        .eq('client_id', id)
+      if (unlinkErr) console.error('deleteClient (unlink contracts):', unlinkErr)
+      const { error } = await db
+        .from('clients')
         .delete()
         .eq('id', id)
-        .then(({ error }) => { if (error) console.error('deleteClient:', error) })
+      if (error) console.error('deleteClient:', error)
     }
 
     return {
@@ -1234,6 +1268,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       deleteProject,
       archiveProject,
       restoreProject,
+      createSiteForClient,
       createAndLinkSite,
       linkSite,
       unlinkSite,

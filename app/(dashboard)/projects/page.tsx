@@ -9,7 +9,6 @@ import { Select } from '@/components/dashboard/Select'
 import { NumericInput } from '@/components/dashboard/NumericInput'
 import { InfoTooltip } from '@/components/dashboard/InfoTooltip'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
-import { createClient } from '@/lib/supabase/client'
 import type { Project, Site, Activity, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus } from '@/lib/types'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -421,15 +420,6 @@ function ProjectDrawer({ projectId, state, onClose }: {
         />
       )}
 
-      {editActivityId !== null && (
-        <ActivityDrawer
-          projectId={projectId}
-          activityId={editActivityId === 'new' ? null : editActivityId}
-          state={state}
-          onClose={() => setEditActivityId(null)}
-        />
-      )}
-
       <Drawer
         title={p.name}
         subtitle={p.client}
@@ -598,6 +588,14 @@ function ProjectDrawer({ projectId, state, onClose }: {
           </>
         )}
       </Drawer>
+      {editActivityId !== null && (
+        <ActivityDrawer
+          projectId={projectId}
+          activityId={editActivityId === 'new' ? null : editActivityId}
+          state={state}
+          onClose={() => setEditActivityId(null)}
+        />
+      )}
     </>
   )
 }
@@ -612,9 +610,11 @@ function AddProjectModal({ state, onClose }: {
     name: '', client: '', start: '', end: '',
     priority: 'medium', contractValue: 0, projectNumber: undefined,
   })
-  const [existingClients, setExistingClients] = useState<string[]>([])
-  const [newClient, setNewClient] = useState(false)
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [clientOpen, setClientOpen] = useState(false)
+  const [selectedSiteIds, setSelectedSiteIds] = useState<string[]>([])
+  const [pendingSiteNames, setPendingSiteNames] = useState<string[]>([])
+  const [newSiteInput, setNewSiteInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const clientDropRef = useRef<HTMLDivElement>(null)
@@ -629,33 +629,56 @@ function AddProjectModal({ state, onClose }: {
     return () => document.removeEventListener('mousedown', handleOutsideClick)
   }, [clientOpen])
 
-  useEffect(() => {
-    const supabase = createClient()
-    async function loadClients() {
-      const { data: org } = await supabase.from('organizations').select('id').limit(1).single()
-      if (!org) return
-      const { data: rows } = await supabase
-        .from('clients')
-        .select('name')
-        .eq('organization_id', (org as Record<string, unknown>).id as string)
-        .order('name')
-      setExistingClients((rows ?? []).map(r => (r as Record<string, unknown>).name as string))
-    }
-    loadClients()
-  }, [])
+  const activeClients = state.clients.filter(c => c.status !== 'archived')
+  const clientSites = selectedClientId
+    ? state.sites.filter(s => s.clientId === selectedClientId)
+    : []
+
+  const selectClient = (clientId: string, clientName: string) => {
+    setSelectedClientId(clientId)
+    setP(prev => ({ ...prev, client: clientName }))
+    setSelectedSiteIds([])
+    setClientOpen(false)
+  }
+
+  const toggleSite = (siteId: string) => {
+    setSelectedSiteIds(prev =>
+      prev.includes(siteId) ? prev.filter(id => id !== siteId) : [...prev, siteId]
+    )
+  }
+
+  const addPendingSite = () => {
+    const name = newSiteInput.trim()
+    if (!name || pendingSiteNames.includes(name)) return
+    setPendingSiteNames(prev => [...prev, name])
+    setNewSiteInput('')
+  }
 
   const save = async () => {
     if (!p.name.trim()) { setSaveError('Project name is required.'); return }
-    if (!p.client.trim()) { setSaveError('Client is required.'); return }
+    if (!selectedClientId) { setSaveError('Client is required.'); return }
+    if (!p.start) { setSaveError('Start date is required.'); return }
+    if (!p.end) { setSaveError('End date is required.'); return }
+    if (p.contractValue <= 0) { setSaveError('Contract value must be greater than $0.'); return }
+    if (selectedSiteIds.length + pendingSiteNames.length === 0) { setSaveError('At least one site is required.'); return }
+
     setSaving(true)
     setSaveError(null)
-    const err = await state.addProject(p)
-    setSaving(false)
-    if (err === null) {
-      onClose()
-    } else {
-      setSaveError(err)
+    const result = await state.addProject(p)
+    if (typeof result === 'string') {
+      setSaving(false)
+      setSaveError(result)
+      return
     }
+    const projectId = result.id
+    for (const siteId of selectedSiteIds) {
+      state.linkSite(projectId, siteId)
+    }
+    for (const siteName of pendingSiteNames) {
+      await state.createAndLinkSite(projectId, siteName, undefined, selectedClientId)
+    }
+    setSaving(false)
+    onClose()
   }
 
   return (
@@ -672,65 +695,93 @@ function AddProjectModal({ state, onClose }: {
       </Field>
 
       <Field label="Client">
-        {!newClient ? (
-          <div ref={clientDropRef} style={{ position: 'relative' }}>
-            <button
-              type="button"
-              onClick={() => setClientOpen(o => !o)}
-              style={{
-                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 8,
-                background: 'var(--bg-elev)', fontSize: 13, cursor: 'pointer', textAlign: 'left',
-                color: p.client ? 'var(--ink)' : 'var(--ink-3)',
-                outline: clientOpen ? '2px solid var(--accent)' : 'none', outlineOffset: -1,
-              }}
-            >
-              <span>{p.client || 'Select client…'}</span>
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0, marginLeft: 8, opacity: 0.5, transform: clientOpen ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }}>
-                <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-            {clientOpen && (
-              <div style={{
-                position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 100,
-                background: 'var(--bg-elev)', border: '1px solid var(--line)',
-                borderRadius: 10, boxShadow: '0 8px 24px oklch(0.18 0.015 150 / 0.12)', overflow: 'hidden',
-              }}>
-                {existingClients.map(c => (
-                  <button key={c} type="button"
-                    onClick={() => { setP({ ...p, client: c }); setClientOpen(false) }}
-                    style={{
-                      display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
-                      fontSize: 13, background: p.client === c ? 'var(--accent-soft)' : 'transparent',
-                      color: p.client === c ? 'var(--accent)' : 'var(--ink)', cursor: 'pointer',
-                      border: 'none', borderBottom: '1px solid var(--line)',
-                    }}
-                    onMouseEnter={e => { if (p.client !== c) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-sunken)' }}
-                    onMouseLeave={e => { if (p.client !== c) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
-                  >{c}</button>
-                ))}
-                <button type="button"
-                  onClick={() => { setNewClient(true); setP({ ...p, client: '' }); setClientOpen(false) }}
+        <div ref={clientDropRef} style={{ position: 'relative' }}>
+          <button type="button" onClick={() => setClientOpen(o => !o)}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 8,
+              background: 'var(--bg-elev)', fontSize: 13, cursor: 'pointer', textAlign: 'left',
+              color: p.client ? 'var(--ink)' : 'var(--ink-3)',
+              outline: clientOpen ? '2px solid var(--accent)' : 'none', outlineOffset: -1,
+            }}
+          >
+            <span>{p.client || 'Select client…'}</span>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0, marginLeft: 8, opacity: 0.5, transform: clientOpen ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }}>
+              <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          {clientOpen && (
+            <div style={{
+              position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 100,
+              background: 'var(--bg-elev)', border: '1px solid var(--line)',
+              borderRadius: 10, boxShadow: '0 8px 24px oklch(0.18 0.015 150 / 0.12)',
+              overflow: 'hidden', maxHeight: 220, overflowY: 'auto',
+            }}>
+              {activeClients.length === 0 && (
+                <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>
+                  No clients — add one in the Clients section first
+                </div>
+              )}
+              {activeClients.map(c => (
+                <button key={c.id} type="button"
+                  onClick={() => selectClient(c.id, c.name)}
                   style={{
                     display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
-                    fontSize: 13, background: 'transparent', color: 'var(--accent)',
-                    cursor: 'pointer', border: 'none', fontWeight: 500,
+                    fontSize: 13, background: selectedClientId === c.id ? 'var(--accent-soft)' : 'transparent',
+                    color: selectedClientId === c.id ? 'var(--accent)' : 'var(--ink)', cursor: 'pointer',
+                    border: 'none', borderBottom: '1px solid var(--line)',
                   }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-soft)' }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
-                >+ New client…</button>
+                  onMouseEnter={e => { if (selectedClientId !== c.id) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-sunken)' }}
+                  onMouseLeave={e => { if (selectedClientId !== c.id) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                >{c.name}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      </Field>
+
+      {/* Site picker — only shown when a client is selected */}
+      {selectedClientId && (
+        <Field label="Sites (select existing or add new)">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {clientSites.map(s => (
+              <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                <input type="checkbox" checked={selectedSiteIds.includes(s.id)}
+                  onChange={() => toggleSite(s.id)}
+                  style={{ accentColor: 'var(--accent)', width: 14, height: 14, flexShrink: 0 }} />
+                <span>{s.name}</span>
+              </label>
+            ))}
+            {pendingSiteNames.map(name => (
+              <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                <input type="checkbox" checked readOnly
+                  style={{ accentColor: 'var(--accent)', width: 14, height: 14, flexShrink: 0 }} />
+                <span>{name}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--accent)' }}>new</span>
+                <button className="iconbtn" type="button" style={{ marginLeft: 'auto', color: 'var(--ink-3)' }}
+                  onClick={() => setPendingSiteNames(prev => prev.filter(n => n !== name))}>
+                  <Icon name="x" size={10} />
+                </button>
+              </div>
+            ))}
+            {clientSites.length === 0 && pendingSiteNames.length === 0 && (
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>
+                No sites for this client yet — add one below
               </div>
             )}
+            <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+              <input className="input" placeholder="Add new site name…"
+                value={newSiteInput} onChange={e => setNewSiteInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addPendingSite() } }}
+                style={{ flex: 1 }} />
+              <button className="btn" type="button" onClick={addPendingSite}
+                disabled={!newSiteInput.trim()} style={{ flexShrink: 0 }}>
+                Add
+              </button>
+            </div>
           </div>
-        ) : (
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input className="input" style={{ flex: 1 }} placeholder="New client name…"
-              value={p.client} onChange={e => setP({ ...p, client: e.target.value })} autoFocus />
-            <button className="btn" type="button"
-              onClick={() => { setNewClient(false); setP({ ...p, client: '' }) }}>Cancel</button>
-          </div>
-        )}
-      </Field>
+        </Field>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Start date">
@@ -820,7 +871,7 @@ function ActivityTypesModal({ state, onClose }: {
           <div className="drawer-head">
             <div>
               <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 24, margin: 0, letterSpacing: '-0.015em' }}>
-                Activity Types
+                Activities
               </h3>
             </div>
             <button className="iconbtn" onClick={onClose}><Icon name="close" size={16} /></button>

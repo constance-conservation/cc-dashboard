@@ -63,6 +63,7 @@ export type Site = {
   notes?: string
   active: boolean
   sortOrder: number
+  clientId?: string
 }
 
 // Links an org site to a specific project contract (many-to-many).
