@@ -96,7 +96,7 @@ function AddClientModal({ state, onClose }: { state: ReturnType<typeof useCCStat
 
 // ── ClientDrawer ───────────────────────────────────────────────────────────────
 
-type ClientTab = 'details' | 'projects'
+type ClientTab = 'details' | 'projects' | 'sites'
 
 function ClientDrawer({ clientId, state, onClose }: {
   clientId: string
@@ -111,9 +111,16 @@ function ClientDrawer({ clientId, state, onClose }: {
   const [edit, setEdit] = useState<Client>({ ...client })
   const [tab, setTab] = useState<ClientTab>('details')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [newSiteName, setNewSiteName] = useState('')
+  const [newSiteNotes, setNewSiteNotes] = useState('')
+  const [addingSite, setAddingSite] = useState(false)
+  const [siteError, setSiteError] = useState<string | null>(null)
+  const [confirmDeleteSiteId, setConfirmDeleteSiteId] = useState<string | null>(null)
+  const [editSiteId, setEditSiteId] = useState<string | null>(null)
 
   const linkedProjects = state.projects.filter(p => p.client === client.name)
   const hasProjects = linkedProjects.length > 0
+  const clientSites = state.sites.filter(s => s.clientId === client.id)
 
   const save = () => { state.updateClient(client.id, edit); onClose() }
 
@@ -125,16 +132,38 @@ function ClientDrawer({ clientId, state, onClose }: {
     border: '1px solid ' + (tab === t ? 'var(--accent)' : 'transparent'),
   })
 
+  const addSite = async () => {
+    if (!newSiteName.trim()) return
+    setAddingSite(true)
+    setSiteError(null)
+    const err = await state.createSiteForClient(client.id, newSiteName.trim(), newSiteNotes.trim() || undefined)
+    setAddingSite(false)
+    if (err === null) { setNewSiteName(''); setNewSiteNotes('') }
+    else setSiteError(err)
+  }
+
   return (
     <>
       {confirmDelete && (
         <ConfirmDialog
           title={`Delete "${client.name}"?`}
-          message="This will permanently remove the client. This cannot be undone."
+          message={hasProjects
+            ? `This will permanently remove the client. This cannot be undone.\n\nThis client has linked projects — they will be unlinked but not deleted.`
+            : 'This will permanently remove the client. This cannot be undone.'}
           confirmLabel="Delete client"
           danger
           onConfirm={() => { state.deleteClient(client.id); onClose() }}
           onCancel={() => setConfirmDelete(false)}
+        />
+      )}
+      {confirmDeleteSiteId && (
+        <ConfirmDialog
+          title="Delete site permanently?"
+          message="This will remove the site from the client library. This cannot be undone."
+          confirmLabel="Delete site"
+          danger
+          onConfirm={() => { state.deleteSite(confirmDeleteSiteId); setConfirmDeleteSiteId(null) }}
+          onCancel={() => setConfirmDeleteSiteId(null)}
         />
       )}
       <Drawer
@@ -142,7 +171,7 @@ function ClientDrawer({ clientId, state, onClose }: {
         subtitle={client.clientType ? TYPE_LABEL[client.clientType] : undefined}
         onClose={onClose}
         onSave={tab === 'details' ? save : undefined}
-        onDelete={tab === 'details' && !hasProjects ? () => setConfirmDelete(true) : undefined}
+        onDelete={tab === 'details' ? () => setConfirmDelete(true) : undefined}
         onArchive={tab === 'details' && !isArchived ? () => { state.archiveClient(client.id); onClose() } : undefined}
         onRestore={tab === 'details' && isArchived ? () => { state.restoreClient(client.id); onClose() } : undefined}
       >
@@ -151,6 +180,9 @@ function ClientDrawer({ clientId, state, onClose }: {
           <button style={tabStyle('details')} onClick={() => setTab('details')}>Details</button>
           <button style={tabStyle('projects')} onClick={() => setTab('projects')}>
             Projects{linkedProjects.length > 0 ? ` (${linkedProjects.length})` : ''}
+          </button>
+          <button style={tabStyle('sites')} onClick={() => setTab('sites')}>
+            Sites{clientSites.length > 0 ? ` (${clientSites.length})` : ''}
           </button>
         </div>
 
@@ -194,11 +226,6 @@ function ClientDrawer({ clientId, state, onClose }: {
                 onChange={e => setEdit({ ...edit, notes: e.target.value || undefined })}
                 style={{ resize: 'vertical', fontFamily: 'inherit' }} />
             </Field>
-            {hasProjects && (
-              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: 4 }}>
-                Delete unavailable — client has {linkedProjects.length} linked project{linkedProjects.length !== 1 ? 's' : ''}
-              </div>
-            )}
           </>
         )}
 
@@ -229,6 +256,88 @@ function ClientDrawer({ clientId, state, onClose }: {
                 )}
               </div>
             ))}
+          </>
+        )}
+
+        {tab === 'sites' && (
+          <>
+            {/* Add new site form */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 16, alignItems: 'flex-end' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)' }}>
+                  New site name
+                </label>
+                <input className="input" placeholder="e.g. Camden South bushland"
+                  value={newSiteName} onChange={e => setNewSiteName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addSite() }} />
+              </div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)' }}>
+                  Notes (optional)
+                </label>
+                <input className="input" placeholder="Optional notes"
+                  value={newSiteNotes} onChange={e => setNewSiteNotes(e.target.value)} />
+              </div>
+              <button className="btn primary" onClick={addSite} disabled={addingSite || !newSiteName.trim()}
+                style={{ flexShrink: 0 }}>
+                <Icon name="plus" size={12} /> Add
+              </button>
+            </div>
+            {siteError && (
+              <div style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12, background: 'oklch(0.95 0.02 25)', color: 'var(--danger)', border: '1px solid oklch(0.85 0.06 25)', marginBottom: 12 }}>
+                {siteError}
+              </div>
+            )}
+
+            {/* Site list */}
+            {clientSites.length === 0 ? (
+              <div style={{ color: 'var(--ink-3)', fontSize: 12, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '12px 0' }}>
+                No sites yet — add one above
+              </div>
+            ) : clientSites.map(s => {
+              const linkedToProjects = state.projectSiteLinks.some(l => l.siteId === s.id)
+              return (
+                <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
+                  <div style={{ flex: 1 }}>
+                    {editSiteId === s.id ? (
+                      <input className="input" defaultValue={s.name}
+                        onBlur={e => { state.updateSite(s.id, { name: e.target.value.trim() || s.name }); setEditSiteId(null) }}
+                        autoFocus style={{ width: '100%' }} />
+                    ) : (
+                      <div style={{ fontSize: 13, fontWeight: 500, cursor: 'text' }} onClick={() => setEditSiteId(s.id)}>
+                        {s.name}
+                      </div>
+                    )}
+                    {s.notes && (
+                      <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+                        {s.notes.length > 60 ? s.notes.slice(0, 60) + '…' : s.notes}
+                      </div>
+                    )}
+                  </div>
+                  {linkedToProjects && (
+                    <span className="pill" style={{ fontSize: 10 }}>
+                      {state.projectSiteLinks.filter(l => l.siteId === s.id).length} project{state.projectSiteLinks.filter(l => l.siteId === s.id).length !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button className="iconbtn" onClick={() => setEditSiteId(s.id)}>
+                      <Icon name="edit" size={12} />
+                    </button>
+                    <button className="iconbtn"
+                      onClick={() => linkedToProjects ? undefined : setConfirmDeleteSiteId(s.id)}
+                      style={{
+                        color: linkedToProjects ? 'var(--ink-4)' : 'var(--danger)',
+                        cursor: linkedToProjects ? 'not-allowed' : 'pointer',
+                      }}
+                      title={linkedToProjects ? 'Unlink from all projects before deleting' : 'Delete permanently'}
+                      disabled={linkedToProjects}
+                    >
+                      <Icon name="trash" size={12} />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
           </>
         )}
       </Drawer>
