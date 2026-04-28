@@ -7,16 +7,25 @@ import { Icon } from '@/components/icons/Icon'
 import { createClient } from '@/lib/supabase/client'
 
 // ── App definitions ────────────────────────────────────────────
-const APPS = [
-  { id: 'roster',    href: '/rostering',  name: 'Rostering',        icon: 'roster'    as const, desc: 'Monthly crew scheduling by project' },
-  { id: 'projects',  href: '/projects',   name: 'Projects',          icon: 'projects'  as const, desc: 'Live project list, capacity & budget' },
-  { id: 'employees', href: '/employees',  name: 'Employees',         icon: 'employees' as const, desc: 'Team details, skills & availability' },
-  { id: 'tender',    href: '/tendering',  name: 'Tendering',         icon: 'tender'    as const, desc: 'Live bids, proposals & submissions',  comingSoon: true },
+const APPS_OPERATIONS = [
+  { id: 'roster',    href: '/rostering',  name: 'Rostering',      icon: 'roster'    as const, desc: 'Monthly crew scheduling by project' },
   { id: 'staff',     href: 'https://constance-reporting.vercel.app/', name: 'Staff Reporting', icon: 'staff' as const, desc: 'Daily reports, timesheets & incident logs' },
-  { id: 'finance',   href: '/finances',   name: 'Finances',          icon: 'finance'   as const, desc: 'P&L, invoicing, cash position',        comingSoon: true },
-  { id: 'fleet',     href: '/fleet',      name: 'Fleet & Equipment', icon: 'fleet'     as const, desc: 'Vehicles, servicing & live locations',  comingSoon: true },
-  { id: 'inventory', href: '/inventory',  name: 'Inventory',         icon: 'inventory' as const, desc: 'Stock levels, consumables & equipment',  comingSoon: true },
+  { id: 'tender',    href: '/tendering',  name: 'Tendering',      icon: 'tender'    as const, desc: 'Live bids, proposals & submissions', comingSoon: true },
 ]
+
+const APPS_MANAGEMENT = [
+  { id: 'projects',  href: '/projects',   name: 'Projects',       icon: 'projects'  as const, desc: 'Live project list, capacity & budget' },
+  { id: 'sites',     href: '/sites',      name: 'Sites',          icon: 'projects'  as const, desc: 'Org-wide location library' },
+  { id: 'employees', href: '/employees',  name: 'Employees',      icon: 'employees' as const, desc: 'Team details, skills & availability' },
+  { id: 'finance',   href: '/finances',   name: 'Finances',       icon: 'finance'   as const, desc: 'P&L, invoicing, cash position', comingSoon: true },
+]
+
+const APPS_ASSETS = [
+  { id: 'fleet',     href: '/fleet',      name: 'Fleet & Equipment', icon: 'fleet'  as const, desc: 'Vehicles, servicing & live locations', comingSoon: true },
+  { id: 'inventory', href: '/inventory',  name: 'Inventory',      icon: 'inventory' as const, desc: 'Stock levels, consumables & equipment', comingSoon: true },
+]
+
+type AppEntry = { id: string; href: string; name: string; icon: 'roster' | 'tender' | 'staff' | 'finance' | 'fleet' | 'inventory' | 'employees' | 'projects' | 'tasks' | 'back' | 'arrow' | 'search' | 'bell' | 'settings' | 'close' | 'x' | 'plus' | 'filter' | 'download' | 'check' | 'trash' | 'edit' | 'cloud' | 'archive' | 'unarchive' | 'lock'; desc: string; comingSoon?: boolean }
 
 type AppStats = Record<string, { statVal?: string | number; stat?: string; badge?: string | null; badgeKind?: string }>
 
@@ -162,29 +171,29 @@ function WeatherWidget() {
 }
 
 // ── Layout variants ────────────────────────────────────────────
-function AppGridCards({ stats }: { stats: AppStats }) {
+function AppGridCards({ stats, apps }: { stats: AppStats; apps: AppEntry[] }) {
   return (
     <div className="app-grid">
-      {APPS.map(app => {
+      {apps.map(app => {
         const s = stats[app.id] || {}
         const card = (
-          <div className="app-card" style={(app as {comingSoon?: boolean}).comingSoon ? { opacity: 0.55, cursor: 'default', pointerEvents: 'none' } : undefined}>
+          <div className="app-card" style={app.comingSoon ? { opacity: 0.55, cursor: 'default', pointerEvents: 'none' } : undefined}>
             <div className="app-card-top">
               <div className="app-icon"><Icon name={app.icon} /></div>
-              {(app as {comingSoon?: boolean}).comingSoon
+              {app.comingSoon
                 ? <span className="app-badge">Coming soon</span>
                 : s.badge && <span className={`app-badge ${s.badgeKind || ''}`}>{s.badge}</span>}
             </div>
             <h3 className="app-name">{app.name}</h3>
             <p className="app-desc">{app.desc}</p>
             <div className="app-footer">
-              {(app as {comingSoon?: boolean}).comingSoon
+              {app.comingSoon
                 ? <span className="app-stat" style={{ color: 'var(--ink-4)', fontStyle: 'italic' }}>In development</span>
                 : <><span className="app-stat"><b>{s.statVal ?? '—'}</b>{s.stat || ''}</span><span className="app-arrow"><Icon name="arrow" size={14} /></span></>}
             </div>
           </div>
         )
-        return (app as {comingSoon?: boolean}).comingSoon
+        return app.comingSoon
           ? <div key={app.id} style={{ textDecoration: 'none' }}>{card}</div>
           : <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{card}</Link>
       })}
@@ -192,12 +201,12 @@ function AppGridCards({ stats }: { stats: AppStats }) {
   )
 }
 
-function AppListRows({ stats }: { stats: AppStats }) {
+function AppListRows({ stats, apps }: { stats: AppStats; apps: AppEntry[] }) {
   return (
     <div className="app-list">
-      {APPS.map(app => {
+      {apps.map(app => {
         const s = stats[app.id] || {}
-        const cs = (app as {comingSoon?: boolean}).comingSoon
+        const cs = app.comingSoon
         const row = (
           <div className="app-row" style={cs ? { opacity: 0.55, cursor: 'default', pointerEvents: 'none' } : undefined}>
             <div className="app-icon"><Icon name={app.icon} size={18} /></div>
@@ -224,11 +233,11 @@ function AppListRows({ stats }: { stats: AppStats }) {
   )
 }
 
-function AppCompactGrid() {
+function AppCompactGrid({ apps }: { apps: AppEntry[] }) {
   return (
     <div className="app-compact-grid">
-      {APPS.map(app => {
-        const cs = (app as {comingSoon?: boolean}).comingSoon
+      {apps.map(app => {
+        const cs = app.comingSoon
         const tile = (
           <div className="app-compact" style={cs ? { opacity: 0.55, cursor: 'default', pointerEvents: 'none' } : undefined}>
             <div className="app-icon"><Icon name={app.icon} size={16} /></div>
@@ -333,6 +342,7 @@ export default function DashboardPage() {
   const stats: AppStats = {
     roster:   { statVal: onShiftToday, stat: ' on shift', badge: null },
     projects: { statVal: state.projects.length, stat: ' active', badge: null },
+    sites:    { statVal: state.sites.length, stat: ' locations', badge: null },
     employees: { statVal: state.employees.length, stat: ' team', badge: null },
     tender: {
       statVal:  summary?.liveTenders ?? '—',
@@ -353,8 +363,6 @@ export default function DashboardPage() {
     },
   }
 
-  const LayoutComp = layout === 'list' ? <AppListRows stats={stats} /> : layout === 'compact' ? <AppCompactGrid /> : <AppGridCards stats={stats} />
-
   return (
     <>
       {/* Hero */}
@@ -372,7 +380,6 @@ export default function DashboardPage() {
             <div><span className="label">On shift today</span><span className="val">{onShiftToday > 0 ? `${onShiftToday} staff across ${activeSites} site${activeSites !== 1 ? 's' : ''}` : 'No crew rostered'}</span></div>
             <div><span className="label">Active projects</span><span className="val">{state.projects.length} running</span></div>
             <div><span className="label">Outstanding invoices</span><span className="val">{summary ? fmt(summary.outstandingAmount) : '—'}</span></div>
-
           </div>
         </div>
       </div>
@@ -426,7 +433,33 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {LayoutComp}
+        {layout === 'list'
+          ? <AppListRows stats={stats} apps={APPS_OPERATIONS} />
+          : layout === 'compact'
+          ? <AppCompactGrid apps={APPS_OPERATIONS} />
+          : <AppGridCards stats={stats} apps={APPS_OPERATIONS} />}
+
+        {/* Business Management section */}
+        <div className="section-head" style={{ marginTop: 32 }}>
+          <div className="section-title">Business Management</div>
+        </div>
+
+        {layout === 'list'
+          ? <AppListRows stats={stats} apps={APPS_MANAGEMENT} />
+          : layout === 'compact'
+          ? <AppCompactGrid apps={APPS_MANAGEMENT} />
+          : <AppGridCards stats={stats} apps={APPS_MANAGEMENT} />}
+
+        {/* Assets & Operations section */}
+        <div className="section-head" style={{ marginTop: 32 }}>
+          <div className="section-title">Assets &amp; Operations</div>
+        </div>
+
+        {layout === 'list'
+          ? <AppListRows stats={stats} apps={APPS_ASSETS} />
+          : layout === 'compact'
+          ? <AppCompactGrid apps={APPS_ASSETS} />
+          : <AppGridCards stats={stats} apps={APPS_ASSETS} />}
 
         {/* Bottom panels */}
         <div className="panel-grid">
