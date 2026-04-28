@@ -290,9 +290,10 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           .select('*, clients(name)')
           .eq('clients.organization_id', oid),
         supabase
-          .from('project_sites')
+          .from('sites')
           .select('*')
           .eq('organization_id', oid)
+          .not('project_id', 'is', null)
           .order('sort_order'),
         supabase
           .from('activity_types')
@@ -480,7 +481,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
 
       const { orgId: oid } = ref()
       const { data: inserted, error } = await db
-        .from('project_sites')
+        .from('sites')
         .insert({
           organization_id: oid,
           project_id:      s.projectId,
@@ -511,7 +512,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         ...prev,
         sites: prev.sites.map(s => s.id === id ? { ...s, ...patch } : s),
       }))
-      db.from('project_sites')
+      db.from('sites')
         .update(sitePatch(patch))
         .eq('id', id)
         .then(({ error }) => { if (error) console.error('updateSite:', error) })
@@ -523,7 +524,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         sites:      prev.sites.filter(s => s.id !== id),
         activities: prev.activities.map(a => a.siteId === id ? { ...a, siteId: undefined } : a),
       }))
-      db.from('project_sites')
+      db.from('sites')
         .delete()
         .eq('id', id)
         .then(({ error }) => { if (error) console.error('deleteSite:', error) })
