@@ -31,9 +31,9 @@ function AddSiteModal({ onClose, onCreate }: {
   }
 
   return (
-    <Drawer title="New location" subtitle="Add to org library" onClose={onClose} onSave={save}
+    <Drawer title="New site" subtitle="Add to org sites" onClose={onClose} onSave={save}
       saveLabel={saving ? 'Creating…' : 'Create'} saveDisabled={saving}>
-      <Field label="Location name">
+      <Field label="Site name">
         <input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus />
       </Field>
       <Field label="Notes (optional)">

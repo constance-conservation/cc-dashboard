@@ -15,7 +15,7 @@ const APPS_OPERATIONS = [
 
 const APPS_MANAGEMENT = [
   { id: 'projects',  href: '/projects',   name: 'Projects',       icon: 'projects'  as const, desc: 'Live project list, capacity & budget' },
-  { id: 'sites',     href: '/sites',      name: 'Sites',          icon: 'projects'  as const, desc: 'Org-wide location library' },
+  { id: 'sites',     href: '/sites',      name: 'Sites',          icon: 'projects'  as const, desc: 'Project sites & field locations' },
   { id: 'employees', href: '/employees',  name: 'Employees',      icon: 'employees' as const, desc: 'Team details, skills & availability' },
   { id: 'finance',   href: '/finances',   name: 'Finances',       icon: 'finance'   as const, desc: 'P&L, invoicing, cash position', comingSoon: true },
 ]
@@ -441,7 +441,7 @@ export default function DashboardPage() {
 
         {/* Business Management section */}
         <div className="section-head" style={{ marginTop: 32 }}>
-          <div className="section-title">Business Management</div>
+          <div className="section-title">Organisation</div>
         </div>
 
         {layout === 'list'

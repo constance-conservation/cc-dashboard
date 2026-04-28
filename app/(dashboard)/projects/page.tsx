@@ -116,7 +116,7 @@ function SiteSearchDropdown({ linkedIds, allOrgSites, onLink, onCreateAndLink }:
     <div ref={wrapRef} style={{ position: 'relative' }}>
       <input
         className="input"
-        placeholder={available.length === 0 ? 'All locations linked — type to create new…' : 'Search locations or add new…'}
+        placeholder={available.length === 0 ? 'All sites linked — type to add new…' : 'Search sites or add new…'}
         value={query}
         onChange={e => { setQuery(e.target.value); setOpen(true) }}
         onFocus={() => setOpen(true)}
@@ -527,7 +527,7 @@ function ProjectDrawer({ projectId, state, onClose }: {
             ))}
             <div style={{ marginTop: 16 }}>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 6 }}>
-                Link location
+                Add site
               </div>
               <SiteSearchDropdown
                 linkedIds={linkedIds}
@@ -768,107 +768,135 @@ function AddProjectModal({ state, onClose }: {
   )
 }
 
-// ── ManageActivitiesModal ──────────────────────────────────────────────────────
+// ── ActivityTypesModal ─────────────────────────────────────────────────────────
 
-function ManageActivitiesModal({ state, onClose }: {
+function ActivityTypesModal({ state, onClose }: {
   state: ReturnType<typeof useCCState>
   onClose: () => void
 }) {
-  const [editActivityId, setEditActivityId] = useState<string | null>(null)
-  const [editProjectId, setEditProjectId] = useState<string | null>(null)
-  const [filterStatus, setFilterStatus] = useState<'all' | ActivityStatus>('all')
+  const [newName, setNewName] = useState('')
+  const [newDesc, setNewDesc] = useState('')
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDesc, setEditDesc] = useState('')
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
-  const filtered = state.activities.filter(a =>
-    filterStatus === 'all' || a.status === filterStatus
-  )
+  const addNew = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newName.trim()) return
+    state.addActivityType(newName.trim(), newDesc.trim() || undefined)
+    setNewName('')
+    setNewDesc('')
+  }
 
-  const byProject = state.projects.map(p => ({
-    project: p,
-    activities: filtered.filter(a => a.projectId === p.id),
-  })).filter(g => g.activities.length > 0)
+  const startEdit = (t: { id: string; name: string; description?: string }) => {
+    setEditId(t.id)
+    setEditName(t.name)
+    setEditDesc(t.description ?? '')
+  }
+
+  const commitEdit = () => {
+    if (!editId || !editName.trim()) return
+    state.updateActivityType(editId, { name: editName.trim(), description: editDesc.trim() || undefined })
+    setEditId(null)
+  }
+
+  const typeInUse = (id: string) => state.activities.some(a => a.activityTypeId === id)
 
   return (
     <>
-      {editActivityId !== null && editProjectId !== null && (
-        <ActivityDrawer
-          projectId={editProjectId}
-          activityId={editActivityId}
-          state={state}
-          onClose={() => { setEditActivityId(null); setEditProjectId(null) }}
+      {confirmDeleteId && (
+        <ConfirmDialog
+          title="Delete activity type?"
+          message="This will remove the type from the library. Existing activities that use this type will not be affected."
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => { state.deleteActivityType(confirmDeleteId); setConfirmDeleteId(null) }}
+          onCancel={() => setConfirmDeleteId(null)}
         />
       )}
       <div className="drawer-backdrop" onClick={onClose}>
-        <div className="drawer" style={{ width: 720, maxWidth: '95vw' }} onClick={e => e.stopPropagation()}>
+        <div className="drawer" style={{ width: 560, maxWidth: '95vw' }} onClick={e => e.stopPropagation()}>
           <div className="drawer-head">
             <div>
               <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 24, margin: 0, letterSpacing: '-0.015em' }}>
-                Manage Activities
+                Activity Types
               </h3>
               <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 3 }}>
-                {state.activities.length} total across {state.projects.length} projects
+                Org-wide library of work categories
               </div>
             </div>
             <button className="iconbtn" onClick={onClose}><Icon name="close" size={16} /></button>
           </div>
 
-          <div style={{ display: 'flex', gap: 4, padding: '0 0 16px' }}>
-            {(['all', 'active', 'on_hold', 'complete'] as const).map(s => (
-              <button key={s} onClick={() => setFilterStatus(s)} style={{
-                padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
-                fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em',
-                background: filterStatus === s ? 'var(--accent-soft)' : 'transparent',
-                color: filterStatus === s ? 'var(--accent)' : 'var(--ink-3)',
-                border: '1px solid ' + (filterStatus === s ? 'var(--accent)' : 'transparent'),
-              }}>
-                {s === 'all' ? 'All' : s === 'on_hold' ? 'On hold' : s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            ))}
-          </div>
-
-          <div className="drawer-body" style={{ padding: 0 }}>
-            {byProject.length === 0 ? (
-              <div style={{ color: 'var(--ink-3)', fontSize: 12, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '20px 0' }}>
-                No activities
+          <div className="drawer-body">
+            {/* Add new */}
+            <form onSubmit={addNew} style={{ display: 'flex', gap: 8, marginBottom: 20, alignItems: 'flex-end' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)' }}>
+                  Name
+                </label>
+                <input className="input" placeholder="e.g. Mechanical Mulching" value={newName}
+                  onChange={e => setNewName(e.target.value)} />
               </div>
-            ) : byProject.map(({ project, activities }) => (
-              <div key={project.id} style={{ marginBottom: 20 }}>
-                <div style={{
-                  fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase',
-                  letterSpacing: '0.06em', color: 'var(--ink-3)', paddingBottom: 6,
-                  borderBottom: '1px solid var(--line)', marginBottom: 8,
-                  display: 'flex', alignItems: 'center', gap: 10,
-                }}>
-                  <span style={{ color: 'var(--ink)', fontWeight: 600 }}>{project.name}</span>
-                  <span>{project.client}</span>
-                  <span>{activities.length} activit{activities.length === 1 ? 'y' : 'ies'}</span>
-                </div>
-                {activities.map(a => (
-                  <div key={a.id}
-                    onClick={() => { setEditActivityId(a.id); setEditProjectId(a.projectId) }}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '8px 10px', borderRadius: 8, cursor: 'pointer', marginBottom: 2,
-                    }}
-                    onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-sunken)'}
-                    onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'transparent'}
-                  >
-                    <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{a.name}</div>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)' }}>
-                      {a.start || '—'} → {a.end || '—'}
-                    </div>
-                    <span className={`pill${a.priority === 'high' ? ' accent' : ''}`} style={{ fontSize: 10 }}>
-                      <span className="dot" />{a.priority}
-                    </span>
-                    <span style={{
-                      fontFamily: 'var(--font-mono)', fontSize: 10,
-                      color: a.status === 'complete' ? 'var(--accent)' : a.status === 'on_hold' ? 'var(--warn)' : 'var(--ink-3)',
-                    }}>
-                      {a.status === 'on_hold' ? 'on hold' : a.status}
-                    </span>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)' }}>
+                  Description (optional)
+                </label>
+                <input className="input" placeholder="Brief description…" value={newDesc}
+                  onChange={e => setNewDesc(e.target.value)} />
+              </div>
+              <button type="submit" className="btn primary" style={{ flexShrink: 0 }}>
+                <Icon name="plus" size={12} /> Add
+              </button>
+            </form>
+
+            {/* List */}
+            {state.activityTypes.length === 0 ? (
+              <div style={{ color: 'var(--ink-3)', fontSize: 12, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '20px 0' }}>
+                No activity types yet — add one above
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {state.activityTypes.map(t => (
+                  <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--bg-sunken)', borderRadius: 8 }}>
+                    {editId === t.id ? (
+                      <>
+                        <div style={{ flex: 1, display: 'flex', gap: 6 }}>
+                          <input className="input" value={editName} onChange={e => setEditName(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditId(null) }}
+                            autoFocus style={{ flex: 1 }} />
+                          <input className="input" value={editDesc} onChange={e => setEditDesc(e.target.value)}
+                            placeholder="Description…"
+                            onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditId(null) }}
+                            style={{ flex: 1 }} />
+                        </div>
+                        <button className="btn primary" onClick={commitEdit} style={{ fontSize: 12, padding: '5px 10px' }}>Save</button>
+                        <button className="btn" onClick={() => setEditId(null)} style={{ fontSize: 12, padding: '5px 10px' }}>Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{t.name}</div>
+                          {t.description && <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 1 }}>{t.description}</div>}
+                        </div>
+                        {typeInUse(t.id) && (
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)' }}>
+                            {state.activities.filter(a => a.activityTypeId === t.id).length} in use
+                          </span>
+                        )}
+                        <button className="iconbtn" onClick={() => startEdit(t)} style={{ color: 'var(--ink-3)' }}>
+                          <Icon name="edit" size={13} />
+                        </button>
+                        <button className="iconbtn" onClick={() => setConfirmDeleteId(t.id)} style={{ color: 'var(--danger)' }}>
+                          <Icon name="trash" size={13} />
+                        </button>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
-            ))}
+            )}
           </div>
 
           <div className="drawer-foot">
@@ -887,7 +915,7 @@ export default function ProjectsPage() {
   const state = useCCState()
   const [selected, setSelected] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
-  const [showManageActivities, setShowManageActivities] = useState(false)
+  const [showActivityTypes, setShowActivityTypes] = useState(false)
   const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active')
   const [filter, setFilter] = useState('')
 
@@ -921,8 +949,8 @@ export default function ProjectsPage() {
           <button className="btn primary" onClick={() => setShowAdd(true)}>
             <Icon name="plus" size={14} /> New project
           </button>
-          <button className="btn" onClick={() => setShowManageActivities(true)}>
-            Manage Activities
+          <button className="btn" onClick={() => setShowActivityTypes(true)}>
+            Activity Types
           </button>
           <button style={tabStyle('active')} onClick={() => setActiveTab('active')}>Active</button>
           <button style={tabStyle('archived')} onClick={() => setActiveTab('archived')}>Archived</button>
@@ -968,7 +996,7 @@ export default function ProjectsPage() {
 
       {selected && <ProjectDrawer projectId={selected} state={state} onClose={() => setSelected(null)} />}
       {showAdd && <AddProjectModal state={state} onClose={() => setShowAdd(false)} />}
-      {showManageActivities && <ManageActivitiesModal state={state} onClose={() => setShowManageActivities(false)} />}
+      {showActivityTypes && <ActivityTypesModal state={state} onClose={() => setShowActivityTypes(false)} />}
     </div>
   )
 }
