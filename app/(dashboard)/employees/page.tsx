@@ -7,6 +7,7 @@ import { Icon } from '@/components/icons/Icon'
 import { Drawer, Field } from '@/components/dashboard/Drawer'
 import { Select } from '@/components/dashboard/Select'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
+import { NumericInput } from '@/components/dashboard/NumericInput'
 import type { Employee } from '@/lib/types'
 
 const EMPLOYMENT_TYPES = [
@@ -186,7 +187,7 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
         <Field label="Employment type">
           <Select value={edit.type} onChange={v => setEdit({ ...edit, type: v as Employee['type'] })} options={EMPLOYMENT_TYPES} />
         </Field>
-        <Field label="Pay rate (AUD/hr)"><input className="input" type="number" value={edit.payRate} onChange={e => setEdit({ ...edit, payRate: +e.target.value })} /></Field>
+        <Field label="Pay rate (AUD/hr)"><NumericInput className="input" value={edit.payRate} onChange={v => setEdit({ ...edit, payRate: v })} /></Field>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Email"><input className="input" value={edit.email} onChange={e => setEdit({ ...edit, email: e.target.value })} /></Field>
@@ -230,7 +231,7 @@ function AddEmployeeModal({ state, onClose }: { state: ReturnType<typeof useCCSt
         <Field label="Email"><input className="input" type="email" placeholder="email@example.com" value={e.email} onChange={ev => setE({ ...e, email: ev.target.value })} /></Field>
         <Field label="Phone"><input className="input" type="tel" placeholder="04xx xxx xxx" value={e.phone} onChange={ev => setE({ ...e, phone: ev.target.value })} /></Field>
       </div>
-      <Field label="Pay rate (AUD/hr)"><input className="input" type="number" value={e.payRate} onChange={ev => setE({ ...e, payRate: +ev.target.value })} /></Field>
+      <Field label="Pay rate (AUD/hr)"><NumericInput className="input" value={e.payRate} onChange={v => setE({ ...e, payRate: v })} /></Field>
       <Field label="Weekly availability">
         <div style={{ display: 'flex', gap: 4 }}>
           {days.map(d => (
