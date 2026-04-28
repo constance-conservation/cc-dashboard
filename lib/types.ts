@@ -7,6 +7,20 @@ export type CrewSizeType = 'fixed' | 'range' | 'any'
 export type ActivityStatus = 'active' | 'complete' | 'on_hold'
 export type CarryoverStatus = 'pending' | 'approved' | 'skipped'
 export type CostEntryType = 'material' | 'equipment' | 'subcontractor' | 'other'
+export type ClientStatus = 'active' | 'prospect' | 'past' | 'archived'
+export type ClientType = 'government' | 'council' | 'corporate' | 'ngo' | 'private'
+
+export type Client = {
+  id: string
+  name: string
+  status: ClientStatus
+  clientType?: ClientType
+  contactName?: string
+  email?: string
+  phone?: string
+  notes?: string
+  abn?: string
+}
 
 export type Availability = {
   mon: boolean
@@ -152,6 +166,8 @@ export type CCState = {
   tasks: Task[]
   roster: Roster
   rosterMonth: string
+  clients: Client[]
+  archivedClients: Client[]
 }
 
 export type Vehicle = {

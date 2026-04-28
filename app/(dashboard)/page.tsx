@@ -16,6 +16,7 @@ const APPS_OPERATIONS = [
 
 const APPS_MANAGEMENT = [
   { id: 'projects',  href: '/projects',   name: 'Projects',       icon: 'projects'  as const, desc: 'Live project list, capacity & budget' },
+  { id: 'clients',   href: '/clients',    name: 'Clients',        icon: 'employees' as const, desc: 'Client directory & contact records' },
   { id: 'sites',     href: '/sites',      name: 'Sites',          icon: 'projects'  as const, desc: 'Project sites & field locations' },
   { id: 'employees', href: '/employees',  name: 'Employees',      icon: 'employees' as const, desc: 'Team details, skills & availability' },
   { id: 'finance',   href: '/finances',   name: 'Finances',       icon: 'finance'   as const, desc: 'P&L, invoicing, cash position', comingSoon: true },
@@ -321,6 +322,7 @@ export default function DashboardPage() {
   const stats: AppStats = {
     roster:   { statVal: onShiftToday, stat: ' on shift', badge: null },
     projects: { statVal: state.projects.length, stat: ' active', badge: null },
+    clients:  { statVal: state.clients.filter(c => c.status === 'active').length, stat: ' active', badge: null },
     sites:    { statVal: state.sites.length, stat: ' locations', badge: null },
     employees: { statVal: state.employees.length, stat: ' team', badge: null },
     tender: {

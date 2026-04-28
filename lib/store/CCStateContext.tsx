@@ -5,6 +5,7 @@ import type {
   CCState, Project, Site, ProjectSiteLink, ActivityType, Activity, ActivityCarryover,
   Employee, Task, Roster, RosterAssignment,
   EmploymentType, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus, CarryoverStatus,
+  Client, ClientStatus, ClientType,
 } from '@/lib/types'
 import { createClient } from '@/lib/supabase/client'
 
@@ -107,6 +108,20 @@ function rowToActivity(r: Record<string, unknown>): Activity {
   }
 }
 
+function rowToClient(r: Record<string, unknown>): Client {
+  return {
+    id: r.id as string,
+    name: (r.name as string) ?? '',
+    status: ((r.status as string) ?? 'active') as ClientStatus,
+    clientType: (r.client_type as ClientType) || undefined,
+    contactName: (r.contact_name as string) || undefined,
+    email: (r.email as string) || undefined,
+    phone: (r.phone as string) || undefined,
+    notes: (r.notes as string) || undefined,
+    abn: (r.abn as string) || undefined,
+  }
+}
+
 // ── DB patch builders ─────────────────────────────────────────────────────────
 
 function staffPatch(e: Partial<Employee>): Record<string, unknown> {
@@ -168,6 +183,19 @@ function activityPatch(a: Partial<Activity>): Record<string, unknown> {
   return row
 }
 
+function clientPatch(c: Partial<Client>): Record<string, unknown> {
+  const row: Record<string, unknown> = {}
+  if (c.name !== undefined)        row.name         = c.name
+  if (c.status !== undefined)      row.status       = c.status
+  if (c.clientType !== undefined)  row.client_type  = c.clientType ?? null
+  if (c.contactName !== undefined) row.contact_name = c.contactName ?? null
+  if (c.email !== undefined)       row.email        = c.email ?? null
+  if (c.phone !== undefined)       row.phone        = c.phone ?? null
+  if (c.notes !== undefined)       row.notes        = c.notes ?? null
+  if (c.abn !== undefined)         row.abn          = c.abn ?? null
+  return row
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type CCActions = {
@@ -219,6 +247,12 @@ type CCActions = {
   resetAll:         () => void
   loading:          boolean
   currentUserName:  string | null
+  // Clients
+  addClient:     (c: Omit<Client, 'id'>) => Promise<string | null>
+  updateClient:  (id: string, patch: Partial<Client>) => void
+  archiveClient: (id: string) => void
+  restoreClient: (id: string) => void
+  deleteClient:  (id: string) => void
 }
 
 type CCContext = CCState & CCActions
@@ -229,6 +263,7 @@ const EMPTY_STATE: CCState = {
   projects: [], sites: [], projectSiteLinks: [], activityTypes: [], activities: [], carryovers: [],
   employees: [], archivedEmployees: [], skills: [], roles: [],
   tasks: [], roster: {}, rosterMonth: new Date().toISOString().slice(0, 7),
+  clients: [], archivedClients: [],
 }
 
 const StateContext = createContext<CCContext | null>(null)
@@ -295,6 +330,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         { data: roleRows },
         { data: taskRows },
         { data: rosterRows },
+        { data: clientRows },
       ] = await Promise.all([
         supabase
           .from('staff')
@@ -349,6 +385,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           .from('roster_assignments')
           .select('*')
           .eq('organization_id', oid),
+        supabase.from('clients').select('*').eq('organization_id', oid).order('name'),
       ])
 
       if (staffErr)    console.error('load staff:',     staffErr)
@@ -392,6 +429,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         }),
         roster,
         rosterMonth: stateRef.current.rosterMonth,
+        clients:         (clientRows ?? []).filter(r => (r as Record<string, unknown>).status !== 'archived').map(r => rowToClient(r as Record<string, unknown>)),
+        archivedClients: (clientRows ?? []).filter(r => (r as Record<string, unknown>).status === 'archived').map(r => rowToClient(r as Record<string, unknown>)),
       })
       setLoading(false)
     }
@@ -1100,6 +1139,93 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       console.warn('resetAll disabled in production mode — data lives in Supabase and must not be deleted here.')
     }
 
+    // ── Clients ────────────────────────────────────────────────────────────────
+
+    async function addClient(c: Omit<Client, 'id'>): Promise<string | null> {
+      const { orgId: oid } = ref()
+      const { data: inserted, error } = await db
+        .from('clients')
+        .insert({
+          organization_id: oid,
+          name:            c.name,
+          status:          c.status,
+          client_type:     c.clientType ?? null,
+          contact_name:    c.contactName ?? null,
+          email:           c.email ?? null,
+          phone:           c.phone ?? null,
+          notes:           c.notes ?? null,
+          abn:             c.abn ?? null,
+        })
+        .select('id')
+        .single()
+      if (error || !inserted) {
+        console.error('addClient:', error?.code, error?.message)
+        return `[${error?.code ?? '?'}] ${error?.message ?? 'Unknown error'}`
+      }
+      const realId = (inserted as Record<string, unknown>).id as string
+      setState(prev => ({
+        ...prev,
+        clients: [...prev.clients, { id: realId, ...c }].sort((a, b) => a.name.localeCompare(b.name)),
+      }))
+      return null
+    }
+
+    function updateClient(id: string, patch: Partial<Client>) {
+      setState(prev => ({
+        ...prev,
+        clients:         prev.clients.map(c => c.id === id ? { ...c, ...patch } : c),
+        archivedClients: prev.archivedClients.map(c => c.id === id ? { ...c, ...patch } : c),
+      }))
+      db.from('clients')
+        .update(clientPatch(patch))
+        .eq('id', id)
+        .then(({ error }) => { if (error) console.error('updateClient:', error) })
+    }
+
+    function archiveClient(id: string) {
+      setState(prev => {
+        const client = prev.clients.find(c => c.id === id)
+        if (!client) return prev
+        return {
+          ...prev,
+          clients:         prev.clients.filter(c => c.id !== id),
+          archivedClients: [...prev.archivedClients, { ...client, status: 'archived' as ClientStatus }],
+        }
+      })
+      db.from('clients')
+        .update({ status: 'archived' })
+        .eq('id', id)
+        .then(({ error }) => { if (error) console.error('archiveClient:', error) })
+    }
+
+    function restoreClient(id: string) {
+      setState(prev => {
+        const client = prev.archivedClients.find(c => c.id === id)
+        if (!client) return prev
+        return {
+          ...prev,
+          archivedClients: prev.archivedClients.filter(c => c.id !== id),
+          clients: [...prev.clients, { ...client, status: 'active' as ClientStatus }].sort((a, b) => a.name.localeCompare(b.name)),
+        }
+      })
+      db.from('clients')
+        .update({ status: 'active' })
+        .eq('id', id)
+        .then(({ error }) => { if (error) console.error('restoreClient:', error) })
+    }
+
+    function deleteClient(id: string) {
+      setState(prev => ({
+        ...prev,
+        clients:         prev.clients.filter(c => c.id !== id),
+        archivedClients: prev.archivedClients.filter(c => c.id !== id),
+      }))
+      db.from('clients')
+        .delete()
+        .eq('id', id)
+        .then(({ error }) => { if (error) console.error('deleteClient:', error) })
+    }
+
     return {
       loading,
       currentUserName: null as string | null,
@@ -1139,6 +1265,11 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       updateDay,
       setRosterMonth,
       resetAll,
+      addClient,
+      updateClient,
+      archiveClient,
+      restoreClient,
+      deleteClient,
     }
   // loading changes after initial fetch completes, which triggers actions to
   // re-bind with the resolved orgId available via stateRef.
