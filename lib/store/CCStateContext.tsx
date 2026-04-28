@@ -171,7 +171,7 @@ function activityPatch(a: Partial<Activity>): Record<string, unknown> {
 type CCActions = {
   // Projects
   updateProject:    (id: string, patch: Partial<Project>) => void
-  addProject:       (p: Omit<Project, 'id'>) => void
+  addProject:       (p: Omit<Project, 'id'>) => Promise<boolean>
   deleteProject:    (id: string) => void
   // Sites
   createAndLinkSite: (projectId: string, name: string, notes?: string) => void
@@ -410,36 +410,33 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .then(({ error }) => { if (error) console.error('updateProject:', error) })
     }
 
-    async function addProject(p: Omit<Project, 'id'>) {
-      const tempId = 'temp-' + Date.now()
-      const optimistic: Project = { id: tempId, ...p }
-      setState(prev => ({ ...prev, projects: [...prev.projects, optimistic] }))
-
+    async function addProject(p: Omit<Project, 'id'>): Promise<boolean> {
       const { orgId: oid } = ref()
 
       // Find or create client by name
       let clientId: string | null = null
-      const { data: existingClients } = await db
-        .from('clients')
-        .select('id')
-        .eq('organization_id', oid)
-        .ilike('name', p.client)
-        .limit(1)
-
-      if (existingClients && existingClients.length > 0) {
-        clientId = (existingClients[0] as Record<string, unknown>).id as string
-      } else if (p.client.trim()) {
-        const { data: newClient, error: clientErr } = await db
+      if (p.client.trim()) {
+        const { data: existingClients } = await db
           .from('clients')
-          .insert({ organization_id: oid, name: p.client })
           .select('id')
-          .single()
-        if (clientErr) {
-          console.error('addProject — create client:', clientErr)
-          setState(prev => ({ ...prev, projects: prev.projects.filter(x => x.id !== tempId) }))
-          return
+          .eq('organization_id', oid)
+          .ilike('name', p.client)
+          .limit(1)
+
+        if (existingClients && existingClients.length > 0) {
+          clientId = (existingClients[0] as Record<string, unknown>).id as string
+        } else {
+          const { data: newClient, error: clientErr } = await db
+            .from('clients')
+            .insert({ organization_id: oid, name: p.client.trim() })
+            .select('id')
+            .single()
+          if (clientErr) {
+            console.error('addProject — create client:', clientErr)
+            return false
+          }
+          clientId = (newClient as Record<string, unknown>).id as string
         }
-        clientId = (newClient as Record<string, unknown>).id as string
       }
 
       const { data: inserted, error } = await db
@@ -448,8 +445,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           organization_id:     oid,
           client_id:           clientId,
           contract_name:       p.name,
-          contract_start_date: p.start,
-          contract_end_date:   p.end,
+          contract_start_date: p.start || null,
+          contract_end_date:   p.end   || null,
           priority:            p.priority,
           contract_value:      p.contractValue,
           project_number:      p.projectNumber ?? null,
@@ -459,15 +456,13 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
 
       if (error || !inserted) {
         console.error('addProject:', error)
-        setState(prev => ({ ...prev, projects: prev.projects.filter(x => x.id !== tempId) }))
-        return
+        return false
       }
 
       const realId = (inserted as Record<string, unknown>).id as string
-      setState(prev => ({
-        ...prev,
-        projects: prev.projects.map(x => x.id === tempId ? { ...x, id: realId } : x),
-      }))
+      const newProject: Project = { id: realId, ...p }
+      setState(prev => ({ ...prev, projects: [...prev.projects, newProject] }))
+      return true
     }
 
     function deleteProject(id: string) {

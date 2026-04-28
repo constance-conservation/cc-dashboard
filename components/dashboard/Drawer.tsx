@@ -12,9 +12,10 @@ type DrawerProps = {
   onArchive?: () => void
   onRestore?: () => void
   saveLabel?: string
+  saveDisabled?: boolean
 }
 
-export function Drawer({ title, subtitle, children, onClose, onSave, onDelete, onArchive, onRestore, saveLabel = 'Save' }: DrawerProps) {
+export function Drawer({ title, subtitle, children, onClose, onSave, onDelete, onArchive, onRestore, saveLabel = 'Save', saveDisabled = false }: DrawerProps) {
   return (
     <div className="drawer-backdrop" onClick={onClose}>
       <div className="drawer" onClick={e => e.stopPropagation()}>
@@ -44,7 +45,7 @@ export function Drawer({ title, subtitle, children, onClose, onSave, onDelete, o
           )}
           <div style={{ flex: 1 }} />
           <button className="btn" onClick={onClose}>Cancel</button>
-          {onSave && <button className="btn primary" onClick={onSave}>{saveLabel}</button>}
+          {onSave && <button className="btn primary" onClick={onSave} disabled={saveDisabled}>{saveLabel}</button>}
         </div>
       </div>
     </div>

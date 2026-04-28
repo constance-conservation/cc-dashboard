@@ -669,6 +669,8 @@ function AddProjectModal({ state, onClose }: {
   const [existingClients, setExistingClients] = useState<string[]>([])
   const [newClient, setNewClient] = useState(false)
   const [clientOpen, setClientOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const clientDropRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -696,14 +698,23 @@ function AddProjectModal({ state, onClose }: {
     loadClients()
   }, [])
 
-  const save = () => {
-    if (!p.name.trim()) return
-    state.addProject(p)
-    onClose()
+  const save = async () => {
+    if (!p.name.trim()) { setSaveError('Project name is required.'); return }
+    if (!p.client.trim()) { setSaveError('Client is required.'); return }
+    setSaving(true)
+    setSaveError(null)
+    const ok = await state.addProject(p)
+    setSaving(false)
+    if (ok) {
+      onClose()
+    } else {
+      setSaveError('Failed to save — check your connection and try again.')
+    }
   }
 
   return (
-    <Drawer title="New project" subtitle="Add to projects list" onClose={onClose} onSave={save} saveLabel="Create">
+    <Drawer title="New project" subtitle="Add to projects list" onClose={onClose} onSave={save}
+      saveLabel={saving ? 'Creating…' : 'Create'} saveDisabled={saving}>
       <Field label="Project name">
         <input className="input" value={p.name}
           onChange={e => setP({ ...p, name: e.target.value })} autoFocus />
@@ -797,6 +808,16 @@ function AddProjectModal({ state, onClose }: {
         <input className="input" value={p.projectNumber ?? ''} placeholder="e.g. CC-2026-04"
           onChange={e => setP({ ...p, projectNumber: e.target.value || undefined })} />
       </Field>
+
+      {saveError && (
+        <div style={{
+          padding: '10px 14px', borderRadius: 8, fontSize: 12,
+          background: 'oklch(0.95 0.02 25)', color: 'var(--danger)',
+          border: '1px solid oklch(0.85 0.06 25)',
+        }}>
+          {saveError}
+        </div>
+      )}
     </Drawer>
   )
 }
