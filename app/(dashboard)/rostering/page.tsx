@@ -6,8 +6,9 @@ import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer } from '@/components/dashboard/Drawer'
 import { Select } from '@/components/dashboard/Select'
+import { NumericInput } from '@/components/dashboard/NumericInput'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
-import type { RosterAssignment, Project, Employee } from '@/lib/types'
+import type { RosterAssignment, Activity, Employee, Priority } from '@/lib/types'
 
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 type DayKey = typeof DAY_KEYS[number]
@@ -24,12 +25,76 @@ function weekdayIdx(ym: string, d: number) {
 }
 function weekdayName(ym: string, d: number): DayKey { return DAY_KEYS[weekdayIdx(ym, d)] }
 
-function autoGenerate(state: ReturnType<typeof useCCState>) {
-  const { projects, employees, rosterMonth } = state
+// ── Per-project config derived from activities ────────────────────────────────
+// Used by the auto-generator as a bridge until the full activity-aware rostering
+// is implemented in Phase 4. Derives scheduling parameters from the project's
+// largest active activity.
+
+type ProjectRosterConfig = {
+  id: string
+  name: string
+  priority: Priority
+  crewSize: number
+  unit: 'days' | 'hours'
+  monthlyAllocation: number
+  visitsPerMonth: number
+  chargeOutRate: number
+  skills: string[]
+  overtimeFlag: boolean
+  contractValue: number
+}
+
+function buildProjectConfigs(
+  projects: ReturnType<typeof useCCState>['projects'],
+  activities: Activity[],
+  rosterMonth: string,
+): ProjectRosterConfig[] {
+  return projects.map(p => {
+    const acts = activities.filter(a => a.projectId === p.id && a.status !== 'on_hold')
+    if (acts.length === 0) return null
+
+    // Primary activity = largest allocation
+    const primary = [...acts].sort((a, b) => b.totalAllocation - a.totalAllocation)[0]
+
+    // Estimate visits/month: distribute remaining units evenly across months in range
+    let visitsPerMonth = 4
+    const remaining = Math.max(0, primary.totalAllocation - primary.unitsCompleted)
+    if (primary.start && primary.end && remaining > 0) {
+      const startD = new Date(primary.start)
+      const endD   = new Date(primary.end)
+      const months = Math.max(1, (endD.getTime() - startD.getTime()) / (1000 * 60 * 60 * 24 * 30))
+      visitsPerMonth = Math.max(1, Math.ceil(remaining / months))
+    }
+
+    const monthlyAlloc = primary.unit === 'days' ? visitsPerMonth : visitsPerMonth * DAY_HOURS
+
+    return {
+      id:              p.id,
+      name:            p.name,
+      priority:        p.priority,
+      crewSize:        primary.crewSizeType === 'any' ? 1 : primary.minCrew,
+      unit:            primary.unit,
+      monthlyAllocation: monthlyAlloc,
+      visitsPerMonth,
+      chargeOutRate:   primary.chargeOutRate,
+      skills:          Array.from(new Set(acts.flatMap(a => a.skills))),
+      overtimeFlag:    acts.some(a => a.overtimeFlag),
+      contractValue:   p.contractValue,
+    }
+  }).filter((x): x is ProjectRosterConfig => x !== null)
+}
+
+// ── Auto-generate ─────────────────────────────────────────────────────────────
+
+function autoGenerate(
+  configs: ProjectRosterConfig[],
+  employees: Employee[],
+  rosterMonth: string,
+): Record<string, RosterAssignment[]> {
   const n = daysInMonth(rosterMonth)
   const hasSat = employees.some(e => e.availability.sat)
   const projectUsage: Record<string, { used: number; visits: number; budgetSpent: number }> = {}
-  projects.forEach(p => { projectUsage[p.id] = { used: 0, visits: 0, budgetSpent: 0 } })
+  configs.forEach(c => { projectUsage[c.id] = { used: 0, visits: 0, budgetSpent: 0 } })
   const newRoster: Record<string, RosterAssignment[]> = {}
   const priorityScore: Record<string, number> = { high: 3, medium: 2, low: 1 }
 
@@ -41,7 +106,7 @@ function autoGenerate(state: ReturnType<typeof useCCState>) {
     days.push(d)
   }
 
-  const sortedProjects = [...projects].sort((a, b) => (priorityScore[b.priority] || 0) - (priorityScore[a.priority] || 0))
+  const sortedConfigs = [...configs].sort((a, b) => (priorityScore[b.priority] || 0) - (priorityScore[a.priority] || 0))
 
   days.forEach((d, dayIdx) => {
     const dKey = dateKey(rosterMonth, d)
@@ -49,26 +114,25 @@ function autoGenerate(state: ReturnType<typeof useCCState>) {
     const assignments: RosterAssignment[] = []
     const usedEmployees = new Set<string>()
 
-    sortedProjects.forEach(p => {
-      const usage = projectUsage[p.id]
-      const expected = Math.ceil((dayIdx + 1) / days.length * p.visitsPerMonth)
-      if (usage.visits >= p.visitsPerMonth) return
+    sortedConfigs.forEach(cfg => {
+      const usage = projectUsage[cfg.id]
+      const expected = Math.ceil((dayIdx + 1) / days.length * cfg.visitsPerMonth)
+      if (usage.visits >= cfg.visitsPerMonth) return
       if (usage.visits >= expected) return
 
       const eligible = employees.filter(e => e.availability[wdName as keyof typeof e.availability] && !usedEmployees.has(e.id))
       if (eligible.length === 0) return
 
       const scored = eligible.map(e => {
-        const match = (p.skills || []).filter(s => e.skills.includes(s)).length
+        const match = cfg.skills.filter(s => e.skills.includes(s)).length
         return { e, score: match + (e.role === 'Field Supervisor' ? 0.5 : 0) }
       }).sort((a, b) => b.score - a.score)
 
-      const crewSize = p.crewSize || 3
       const chosen: Employee[] = []
       let hasSupervisor = false
 
       for (const { e } of scored) {
-        if (chosen.length >= crewSize) break
+        if (chosen.length >= cfg.crewSize) break
         if (e.role === 'Field Supervisor') {
           if (hasSupervisor) continue
           hasSupervisor = true
@@ -76,15 +140,15 @@ function autoGenerate(state: ReturnType<typeof useCCState>) {
         chosen.push(e)
       }
 
-      if (chosen.length < crewSize) return
-      const unitAdd = p.unit === 'days' ? 1 : DAY_HOURS
-      if (usage.used + unitAdd > p.monthlyAllocation) return
-      const cost = p.chargeOutRate * unitAdd
-      if (usage.budgetSpent + cost > p.budget - p.spent) return
+      if (chosen.length < cfg.crewSize) return
+      const unitAdd = cfg.unit === 'days' ? 1 : DAY_HOURS
+      if (usage.used + unitAdd > cfg.monthlyAllocation) return
+      const cost = cfg.chargeOutRate * unitAdd
+      if (usage.budgetSpent + cost > cfg.contractValue) return
 
       chosen.forEach(e => {
         usedEmployees.add(e.id)
-        assignments.push({ employeeId: e.id, projectId: p.id })
+        assignments.push({ employeeId: e.id, projectId: cfg.id })
       })
       usage.visits += 1
       usage.used += unitAdd
@@ -97,7 +161,14 @@ function autoGenerate(state: ReturnType<typeof useCCState>) {
   return newRoster
 }
 
-function CalDay({ day, ym, state, onOpen }: { day: number | null; ym: string; state: ReturnType<typeof useCCState>; onOpen: () => void }) {
+// ── CalDay ────────────────────────────────────────────────────────────────────
+
+function CalDay({ day, ym, state, onOpen }: {
+  day: number | null
+  ym: string
+  state: ReturnType<typeof useCCState>
+  onOpen: () => void
+}) {
   if (!day) return <div className="cal-cell cal-cell-empty" />
   const dKey = dateKey(ym, day)
   const assignments = state.roster[dKey] || []
@@ -114,6 +185,8 @@ function CalDay({ day, ym, state, onOpen }: { day: number | null; ym: string; st
       {Object.entries(byProject).map(([pid, empIds]) => {
         const p = state.projects.find(x => x.id === pid)
         if (!p) return null
+        const primaryAct = state.activities.find(a => a.projectId === pid && a.status === 'active')
+        const crewSize = primaryAct ? (primaryAct.crewSizeType === 'any' ? null : primaryAct.minCrew) : null
         return (
           <div key={pid} className="cal-shift">
             <div className="cal-shift-name">{p.name.split(' — ')[0]}</div>
@@ -124,14 +197,22 @@ function CalDay({ day, ym, state, onOpen }: { day: number | null; ym: string; st
                   if (!e) return null
                   const isSup = e.role === 'Field Supervisor'
                   return (
-                    <div key={eid} className={`cal-avatar${isSup ? ' sup' : ''}`} style={{ marginLeft: i === 0 ? 0 : -5 }} title={`${e.name} · ${e.role}`}>
+                    <div key={eid} className={`cal-avatar${isSup ? ' sup' : ''}`}
+                      style={{ marginLeft: i === 0 ? 0 : -5 }}
+                      title={`${e.name} · ${e.role}`}>
                       {e.name.split(' ').map(x => x[0]).join('').slice(0, 2)}
                     </div>
                   )
                 })}
-                {empIds.length > 4 && <div className="cal-avatar more" style={{ marginLeft: -5 }}>+{empIds.length - 4}</div>}
+                {empIds.length > 4 && (
+                  <div className="cal-avatar more" style={{ marginLeft: -5 }}>
+                    +{empIds.length - 4}
+                  </div>
+                )}
               </div>
-              <span className="cal-shift-count">{empIds.length}/{p.crewSize}</span>
+              <span className="cal-shift-count">
+                {empIds.length}{crewSize !== null ? `/${crewSize}` : ''}
+              </span>
             </div>
           </div>
         )
@@ -140,7 +221,14 @@ function CalDay({ day, ym, state, onOpen }: { day: number | null; ym: string; st
   )
 }
 
-function DayEditor({ day, ym, state, onClose }: { day: number; ym: string; state: ReturnType<typeof useCCState>; onClose: () => void }) {
+// ── DayEditor ─────────────────────────────────────────────────────────────────
+
+function DayEditor({ day, ym, state, onClose }: {
+  day: number
+  ym: string
+  state: ReturnType<typeof useCCState>
+  onClose: () => void
+}) {
   const dKey = dateKey(ym, day)
   const wdName = weekdayName(ym, day)
   const assignments = state.roster[dKey] || []
@@ -168,51 +256,90 @@ function DayEditor({ day, ym, state, onClose }: { day: number; ym: string; state
   return (
     <Drawer title={dateLabel} subtitle={subtitle} onClose={onClose} saveLabel="Done" onSave={onClose}>
       <div style={{ marginBottom: 20 }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)', marginBottom: 10 }}>Assigned ({assignments.length})</div>
-        {assignments.length === 0 && <div style={{ fontSize: 13, color: 'var(--ink-3)', padding: 12, background: 'var(--bg-sunken)', borderRadius: 6 }}>No one assigned to this day yet.</div>}
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)', marginBottom: 10 }}>
+          Assigned ({assignments.length})
+        </div>
+        {assignments.length === 0 && (
+          <div style={{ fontSize: 13, color: 'var(--ink-3)', padding: 12, background: 'var(--bg-sunken)', borderRadius: 6 }}>
+            No one assigned to this day yet.
+          </div>
+        )}
         {assignments.map(a => {
           const emp = state.employees.find(x => x.id === a.employeeId)
           if (!emp) return null
-          const proj = state.projects.find(x => x.id === a.projectId)
-          const canOT = proj?.overtimeFlag
+          // Check if any active activity for this project allows overtime
+          const canOT = state.activities.some(act => act.projectId === a.projectId && act.status === 'active' && act.overtimeFlag)
           return (
             <div key={a.employeeId} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: 10, background: 'var(--bg-sunken)', borderRadius: 6, marginBottom: 6 }}>
-              <div className="staff-avatar" style={{ width: 30, height: 30, fontSize: 10 }}>{emp.name.split(' ').map(x => x[0]).join('')}</div>
+              <div className="staff-avatar" style={{ width: 30, height: 30, fontSize: 10 }}>
+                {emp.name.split(' ').map(x => x[0]).join('')}
+              </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{emp.role}</div>
               </div>
-              <Select value={a.projectId} onChange={v => changeProject(a.employeeId, v)} options={activeProjects.map(p => ({ value: p.id, label: p.name }))} style={{ fontSize: 12, maxWidth: 180 }} />
+              <Select
+                value={a.projectId}
+                onChange={v => changeProject(a.employeeId, v)}
+                options={activeProjects.map(p => ({ value: p.id, label: p.name }))}
+                style={{ fontSize: 12, maxWidth: 180 }}
+              />
               {canOT && (
-                <input className="input" placeholder="OT hrs" type="number" value={a.overtimeHours || ''} onChange={e => toggleOvertime(a.employeeId, Number(e.target.value) || 0)} style={{ width: 70, fontSize: 12 }} />
+                <NumericInput
+                  className="input"
+                  placeholder="OT hrs"
+                  value={a.overtimeHours ?? 0}
+                  onChange={v => toggleOvertime(a.employeeId, v)}
+                  style={{ width: 70, fontSize: 12 }}
+                />
               )}
-              <button className="iconbtn" onClick={() => removeAssignment(a.employeeId)} style={{ color: 'var(--ink-3)' }}><Icon name="close" size={14} /></button>
+              <button className="iconbtn" onClick={() => removeAssignment(a.employeeId)} style={{ color: 'var(--ink-3)' }}>
+                <Icon name="close" size={14} />
+              </button>
             </div>
           )
         })}
       </div>
 
       <div style={{ marginBottom: 20 }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)', marginBottom: 10 }}>Available ({unassignedAvailable.length})</div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)', marginBottom: 10 }}>
+          Available ({unassignedAvailable.length})
+        </div>
         {unassignedAvailable.map(emp => (
           <div key={emp.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: 10, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 6, marginBottom: 6 }}>
-            <div className="staff-avatar" style={{ width: 30, height: 30, fontSize: 10 }}>{emp.name.split(' ').map(x => x[0]).join('')}</div>
+            <div className="staff-avatar" style={{ width: 30, height: 30, fontSize: 10 }}>
+              {emp.name.split(' ').map(x => x[0]).join('')}
+            </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{emp.role} · {emp.skills.slice(0, 2).join(', ')}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                {emp.role} · {emp.skills.slice(0, 2).join(', ')}
+              </div>
             </div>
-            <Select value="" placeholder="+ Add to project…" onChange={v => { if (v) addTo(emp.id, v) }} options={activeProjects.map(p => ({ value: p.id, label: p.name }))} style={{ fontSize: 12, maxWidth: 200 }} />
+            <Select
+              value=""
+              placeholder="+ Add to project…"
+              onChange={v => { if (v) addTo(emp.id, v) }}
+              options={activeProjects.map(p => ({ value: p.id, label: p.name }))}
+              style={{ fontSize: 12, maxWidth: 200 }}
+            />
           </div>
         ))}
-        {unassignedAvailable.length === 0 && <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>All available staff are assigned.</div>}
+        {unassignedAvailable.length === 0 && (
+          <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>All available staff are assigned.</div>
+        )}
       </div>
 
       {unavailable.length > 0 && (
         <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-4)', marginBottom: 10 }}>Unavailable ({unavailable.length}) — visibility only</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-4)', marginBottom: 10 }}>
+            Unavailable ({unavailable.length}) — visibility only
+          </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {unavailable.map(e => (
-              <span key={e.id} style={{ padding: '4px 8px', background: 'var(--bg-sunken)', borderRadius: 4, fontSize: 11, color: 'var(--ink-3)' }}>{e.name}</span>
+              <span key={e.id} style={{ padding: '4px 8px', background: 'var(--bg-sunken)', borderRadius: 4, fontSize: 11, color: 'var(--ink-3)' }}>
+                {e.name}
+              </span>
             ))}
           </div>
         </div>
@@ -221,16 +348,18 @@ function DayEditor({ day, ym, state, onClose }: { day: number; ym: string; state
   )
 }
 
+// ── Rules modal ───────────────────────────────────────────────────────────────
+
 function RulesModal({ onClose }: { onClose: () => void }) {
   return (
     <Drawer title="Auto-generate rules" subtitle="Hard rules the scheduler never breaks" onClose={onClose} saveLabel="Got it" onSave={onClose}>
       <ol style={{ paddingLeft: 20, fontSize: 13, lineHeight: 1.7, color: 'var(--ink-2)' }}>
-        <li>Never exceed a project&apos;s monthly allocated hours / days.</li>
-        <li>Never exceed a project&apos;s visits-per-month cap.</li>
+        <li>Never exceed an activity&apos;s monthly allocated days / hours.</li>
+        <li>Never exceed an activity&apos;s visit-per-month estimate.</li>
         <li>Fixed crew size is always respected — never partial-fill.</li>
         <li>Employees are never scheduled on days outside their availability.</li>
         <li>No two Field Supervisors on the same project on the same day.</li>
-        <li>Never exceed a project&apos;s budget (charge-out × allocated).</li>
+        <li>Never exceed a project&apos;s contract value (charge-out × allocated).</li>
         <li>Equal-priority projects get visits distributed evenly across the month.</li>
       </ol>
       <div style={{ marginTop: 14, fontSize: 12, color: 'var(--ink-3)' }}>
@@ -239,6 +368,8 @@ function RulesModal({ onClose }: { onClose: () => void }) {
     </Drawer>
   )
 }
+
+// ── Main page ──────────────────────────────────────────────────────────────────
 
 export default function RosteringPage() {
   const state = useCCState()
@@ -256,11 +387,18 @@ export default function RosteringPage() {
     setIsDark(next)
     document.documentElement.setAttribute('data-mode', next ? 'dark' : '')
   }
+  void toggleDark // used via theme toggle button if present
 
   const n = daysInMonth(state.rosterMonth)
   const hasSat = state.employees.some(e => e.availability.sat)
   const [y, m] = state.rosterMonth.split('-').map(Number)
   const monthName = new Date(y, m - 1, 1).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })
+
+  // Derive per-project scheduling configs from their activities
+  const projectConfigs = useMemo(
+    () => buildProjectConfigs(state.projects, state.activities, state.rosterMonth),
+    [state.projects, state.activities, state.rosterMonth],
+  )
 
   const stats = useMemo(() => {
     let totalShifts = 0
@@ -277,18 +415,21 @@ export default function RosteringPage() {
       if (!dKey.startsWith(state.rosterMonth)) continue
       const seen = new Set<string>()
       ;(state.roster[dKey] || []).forEach(a => {
-        if (!seen.has(a.projectId)) { projectVisits[a.projectId] = (projectVisits[a.projectId] || 0) + 1; seen.add(a.projectId) }
+        if (!seen.has(a.projectId)) {
+          projectVisits[a.projectId] = (projectVisits[a.projectId] || 0) + 1
+          seen.add(a.projectId)
+        }
       })
     }
     return { totalShifts, uniqueStaff: uniqueStaff.size, projectVisits }
   }, [state.roster, state.rosterMonth, state.projects])
 
   const handleAutoGen = () => setConfirmAction('autogen')
-  const handleClear = () => setConfirmAction('clear')
+  const handleClear   = () => setConfirmAction('clear')
 
   const handleConfirmAction = () => {
     if (confirmAction === 'autogen') {
-      const generated = autoGenerate(state)
+      const generated = autoGenerate(projectConfigs, state.employees, state.rosterMonth)
       const newRoster = { ...state.roster }
       Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
       Object.assign(newRoster, generated)
@@ -347,20 +488,22 @@ export default function RosteringPage() {
           <button className="btn" onClick={() => setShowHelp(true)}>Rules</button>
           <div style={{ flex: 1 }} />
           <button className="btn" onClick={prevMonth}>←</button>
-          <div className="chip" style={{ fontFamily: 'var(--font-display)', fontSize: 16, height: 32, padding: '0 14px', textTransform: 'none', letterSpacing: '-0.01em' }}>{monthName}</div>
+          <div className="chip" style={{ fontFamily: 'var(--font-display)', fontSize: 16, height: 32, padding: '0 14px', textTransform: 'none', letterSpacing: '-0.01em' }}>
+            {monthName}
+          </div>
           <button className="btn" onClick={nextMonth}>→</button>
         </div>
 
-        {/* Project KPI mini-cards */}
+        {/* Project KPI mini-cards (derived from activities) */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginBottom: 18 }}>
-          {state.projects.map(p => {
-            const visits = stats.projectVisits[p.id] || 0
-            const pct = Math.min(100, Math.round(visits / p.visitsPerMonth * 100))
+          {projectConfigs.map(cfg => {
+            const visits = stats.projectVisits[cfg.id] || 0
+            const pct = Math.min(100, cfg.visitsPerMonth > 0 ? Math.round(visits / cfg.visitsPerMonth * 100) : 0)
             return (
-              <div key={p.id} style={{ padding: 14, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10 }}>
-                <div style={{ fontSize: 12, fontWeight: 500, letterSpacing: '-0.005em', marginBottom: 2 }}>{p.name}</div>
+              <div key={cfg.id} style={{ padding: 14, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, letterSpacing: '-0.005em', marginBottom: 2 }}>{cfg.name}</div>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
-                  {visits}/{p.visitsPerMonth} visits · {p.unit}
+                  {visits}/{cfg.visitsPerMonth} visits · {cfg.unit}
                 </div>
                 <div style={{ height: 4, background: 'var(--bg-sunken)', borderRadius: 2 }}>
                   <div style={{ height: '100%', width: pct + '%', background: pct >= 100 ? 'var(--ok)' : 'var(--accent)', borderRadius: 2 }} />
@@ -385,7 +528,9 @@ export default function RosteringPage() {
         </div>
       </div>
 
-      {selectedDay && <DayEditor day={selectedDay} ym={state.rosterMonth} state={state} onClose={() => setSelectedDay(null)} />}
+      {selectedDay && (
+        <DayEditor day={selectedDay} ym={state.rosterMonth} state={state} onClose={() => setSelectedDay(null)} />
+      )}
       {showHelp && <RulesModal onClose={() => setShowHelp(false)} />}
       {confirmAction === 'autogen' && (
         <ConfirmDialog

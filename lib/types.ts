@@ -2,6 +2,11 @@ export type EmploymentType = 'full-time' | 'part-time' | 'casual' | 'contractor'
 export type Priority = 'high' | 'medium' | 'low'
 export type WorkUnit = 'days' | 'hours'
 export type VehicleStatus = 'ok' | 'warn' | 'danger'
+export type AllocationStrategy = 'even' | 'custom'
+export type CrewSizeType = 'fixed' | 'range' | 'any'
+export type ActivityStatus = 'active' | 'complete' | 'on_hold'
+export type CarryoverStatus = 'pending' | 'approved' | 'skipped'
+export type CostEntryType = 'material' | 'equipment' | 'subcontractor' | 'other'
 
 export type Availability = {
   mon: boolean
@@ -24,23 +29,90 @@ export type Employee = {
   phone: string
 }
 
+// Top-level project container. Scheduling, crew, and rates live on Activities.
 export type Project = {
   id: string
   name: string
   client: string
   start: string
   end: string
+  priority: Priority
+  contractValue: number
+  projectNumber?: string
+}
+
+// Physical location within a project (one project can have many sites).
+export type Site = {
+  id: string
+  projectId: string
+  name: string
+  address?: string
+  notes?: string
+  active: boolean
+  sortOrder: number
+}
+
+// Org-scoped category/label for activities (e.g. "Bush Regeneration", "Survey").
+export type ActivityType = {
+  id: string
+  name: string
+  description?: string
+}
+
+// A work package within a project, optionally scoped to a site.
+export type Activity = {
+  id: string
+  projectId: string
+  siteId?: string
+  activityTypeId?: string
+  name: string
+  allocationStrategy: AllocationStrategy
   unit: WorkUnit
-  monthlyAllocation: number
-  visitsPerMonth: number
-  crewSize: number
+  totalAllocation: number
+  unitsCompleted: number   // populated when initialising an already-started activity
+  crewSizeType: CrewSizeType
+  minCrew: number
+  maxCrew?: number         // only used when crewSizeType === 'range'
   chargeOutRate: number
   overtimeFlag: boolean
   overtimeRate: number
-  priority: Priority
-  budget: number
-  spent: number
   skills: string[]
+  priority: Priority
+  status: ActivityStatus
+  start: string
+  end: string
+  notes?: string
+  sortOrder: number
+}
+
+// Custom per-period allocation bucket (for allocationStrategy === 'custom').
+// period: 'YYYY-MM' for monthly, 'YYYY-MM-DD' for a specific date.
+export type ActivityAllocation = {
+  id: string
+  activityId: string
+  period: string
+  allocation: number
+}
+
+// Catch-up queue entry created when a rostered day is understaffed.
+export type ActivityCarryover = {
+  id: string
+  activityId: string
+  originalDateKey: string
+  unitsMissed: number
+  status: CarryoverStatus
+  reviewDate?: string
+  createdAt: string
+}
+
+// Non-labour cost entry for margin tracking on an activity.
+export type CostEntry = {
+  id: string
+  activityId: string
+  date: string
+  amount: number
+  description: string
+  type: CostEntryType
 }
 
 export type Task = {
@@ -53,6 +125,8 @@ export type Task = {
 export type RosterAssignment = {
   employeeId: string
   projectId: string
+  activityId?: string
+  siteId?: string
   overtimeHours?: number
 }
 
@@ -60,6 +134,9 @@ export type Roster = Record<string, RosterAssignment[]>
 
 export type CCState = {
   projects: Project[]
+  sites: Site[]
+  activityTypes: ActivityType[]
+  activities: Activity[]
   employees: Employee[]
   archivedEmployees: Employee[]
   skills: string[]

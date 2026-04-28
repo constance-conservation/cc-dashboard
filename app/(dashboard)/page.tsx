@@ -437,15 +437,17 @@ export default function DashboardPage() {
               <Link href="/projects" className="section-action">All projects →</Link>
             </div>
             {state.projects.map(p => {
-              const pct = Math.min(100, Math.round((p.spent / p.budget) * 100))
+              const acts = state.activities.filter(a => a.projectId === p.id)
+              const doneCount = acts.filter(a => a.status === 'complete').length
+              const pct = acts.length > 0 ? Math.round((doneCount / acts.length) * 100) : 0
               return (
                 <div key={p.id} className="project-item">
                   <div className="project-top">
                     <div className="project-name">{p.name}</div>
-                    <div className="project-meta">${(p.spent / 1000).toFixed(1)}k / ${(p.budget / 1000).toFixed(1)}k</div>
+                    <div className="project-meta">${(p.contractValue / 1000).toFixed(1)}k</div>
                   </div>
                   <div className="progress-bar"><div className="progress-fill" style={{ width: pct + '%' }} /></div>
-                  <div className="progress-row"><span>{p.client}</span><span>{pct}% of budget</span></div>
+                  <div className="progress-row"><span>{p.client}</span><span>{doneCount}/{acts.length} activities done</span></div>
                 </div>
               )
             })}

@@ -6,9 +6,13 @@ import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer, Field } from '@/components/dashboard/Drawer'
 import { Select } from '@/components/dashboard/Select'
+import { NumericInput } from '@/components/dashboard/NumericInput'
+import { InfoTooltip } from '@/components/dashboard/InfoTooltip'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
-import type { Project } from '@/lib/types'
+import type { Project, Site, Activity, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus } from '@/lib/types'
+
+// ── Constants ──────────────────────────────────────────────────────────────────
 
 const PRIORITY_OPTIONS = [
   { value: 'high', label: 'High' },
@@ -19,26 +23,29 @@ const UNIT_OPTIONS = [
   { value: 'days', label: 'Days' },
   { value: 'hours', label: 'Hours' },
 ]
+const ALLOCATION_OPTIONS = [
+  { value: 'even', label: 'Even spread' },
+  { value: 'custom', label: 'Custom (per month)' },
+]
+const CREW_TYPE_OPTIONS = [
+  { value: 'fixed', label: 'Fixed' },
+  { value: 'range', label: 'Range' },
+  { value: 'any', label: 'Any' },
+]
+const STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'complete', label: 'Complete' },
+  { value: 'on_hold', label: 'On hold' },
+]
 
-function CapacityMeter({ label, pct, caption }: { label: string; pct: number; caption: string }) {
-  const color = pct > 90 ? 'var(--danger)' : pct > 75 ? 'var(--warn)' : 'var(--accent)'
-  return (
-    <div>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 6 }}>{label}</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-        <div style={{ fontFamily: 'var(--font-display)', fontSize: 24, lineHeight: 1, letterSpacing: '-0.015em', color }}>
-          {pct}<span style={{ fontSize: 14 }}>%</span>
-        </div>
-      </div>
-      <div style={{ height: 4, background: 'var(--bg-sunken)', borderRadius: 2, margin: '6px 0', overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: pct + '%', background: color, borderRadius: 2 }} />
-      </div>
-      <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{caption}</div>
-    </div>
-  )
-}
+// ── SkillsEditor ───────────────────────────────────────────────────────────────
 
-function SkillsEditor({ selected, allSkills, onChange, onAddSkill }: { selected: string[]; allSkills: string[]; onChange: (s: string[]) => void; onAddSkill: (s: string) => void }) {
+function SkillsEditor({ selected, allSkills, onChange, onAddSkill }: {
+  selected: string[]
+  allSkills: string[]
+  onChange: (s: string[]) => void
+  onAddSkill: (s: string) => void
+}) {
   const [newSkill, setNewSkill] = useState('')
   const toggle = (s: string) => {
     if (selected.includes(s)) onChange(selected.filter(x => x !== s))
@@ -56,123 +63,548 @@ function SkillsEditor({ selected, allSkills, onChange, onAddSkill }: { selected:
     <div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
         {allSkills.map(s => (
-          <button key={s} type="button" onClick={() => toggle(s)} className={`skill-chip toggleable${selected.includes(s) ? ' on' : ''}`}>
+          <button key={s} type="button" onClick={() => toggle(s)}
+            className={`skill-chip toggleable${selected.includes(s) ? ' on' : ''}`}>
             {selected.includes(s) && <Icon name="check" size={10} />} {s}
           </button>
         ))}
       </div>
       <form onSubmit={addNew} style={{ display: 'flex', gap: 6 }}>
-        <input className="input" placeholder="Add new skill…" value={newSkill} onChange={e => setNewSkill(e.target.value)} style={{ flex: 1 }} />
+        <input className="input" placeholder="Add new skill…" value={newSkill}
+          onChange={e => setNewSkill(e.target.value)} style={{ flex: 1 }} />
         <button type="submit" className="btn"><Icon name="plus" size={12} /> Add</button>
       </form>
     </div>
   )
 }
 
-function ProjectCard({ project, state, onOpen }: { project: Project; state: ReturnType<typeof useCCState>; onOpen: () => void }) {
+// ── ActivityDrawer ─────────────────────────────────────────────────────────────
+
+type ActivityFormState = Omit<Activity, 'id'>
+
+function emptyActivity(projectId: string): ActivityFormState {
+  return {
+    projectId,
+    siteId: undefined,
+    activityTypeId: undefined,
+    name: '',
+    allocationStrategy: 'even',
+    unit: 'days',
+    totalAllocation: 0,
+    unitsCompleted: 0,
+    crewSizeType: 'fixed',
+    minCrew: 1,
+    maxCrew: undefined,
+    chargeOutRate: 0,
+    overtimeFlag: false,
+    overtimeRate: 1.5,
+    skills: [],
+    priority: 'medium',
+    status: 'active',
+    start: '',
+    end: '',
+    notes: undefined,
+    sortOrder: 0,
+  }
+}
+
+function ActivityDrawer({ projectId, activityId, state, onClose }: {
+  projectId: string
+  activityId: string | null
+  state: ReturnType<typeof useCCState>
+  onClose: () => void
+}) {
+  const existing = activityId ? state.activities.find(a => a.id === activityId) : null
+  const [form, setForm] = useState<ActivityFormState>(existing ? { ...existing } : emptyActivity(projectId))
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  const sites = state.sites.filter(s => s.projectId === projectId)
+  const siteOptions = [
+    { value: '', label: 'Project-wide (no site)' },
+    ...sites.map(s => ({ value: s.id, label: s.name })),
+  ]
+
+  const save = () => {
+    if (!form.name.trim()) return
+    if (existing) {
+      state.updateActivity(existing.id, form)
+    } else {
+      state.addActivity(form)
+    }
+    onClose()
+  }
+
+  return (
+    <>
+      {confirmDelete && existing && (
+        <ConfirmDialog
+          title={`Delete "${existing.name}"?`}
+          message="This will permanently remove the activity and all associated roster assignments and cost entries."
+          confirmLabel="Delete activity"
+          danger
+          onConfirm={() => { state.deleteActivity(existing.id); onClose() }}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
+      <Drawer
+        title={existing ? existing.name : 'New activity'}
+        subtitle={existing ? 'Edit activity' : 'Add to project'}
+        onClose={onClose}
+        onSave={save}
+        onDelete={existing ? () => setConfirmDelete(true) : undefined}
+        saveLabel={existing ? 'Save' : 'Add activity'}
+      >
+        <Field label="Activity name">
+          <input className="input" value={form.name}
+            onChange={e => setForm({ ...form, name: e.target.value })} autoFocus />
+        </Field>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Field label="Priority">
+            <Select value={form.priority}
+              onChange={v => setForm({ ...form, priority: v as Priority })}
+              options={PRIORITY_OPTIONS} />
+          </Field>
+          <Field label="Status">
+            <Select value={form.status}
+              onChange={v => setForm({ ...form, status: v as ActivityStatus })}
+              options={STATUS_OPTIONS} />
+          </Field>
+        </div>
+
+        {sites.length > 0 && (
+          <Field label="Site">
+            <Select value={form.siteId ?? ''}
+              onChange={v => setForm({ ...form, siteId: v || undefined })}
+              options={siteOptions} />
+          </Field>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Field label="Start date">
+            <input className="input" type="date" value={form.start}
+              onChange={e => setForm({ ...form, start: e.target.value })} />
+          </Field>
+          <Field label="End date">
+            <input className="input" type="date" value={form.end}
+              onChange={e => setForm({ ...form, end: e.target.value })} />
+          </Field>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Field label="Work unit">
+            <Select value={form.unit}
+              onChange={v => setForm({ ...form, unit: v as WorkUnit })}
+              options={UNIT_OPTIONS} />
+          </Field>
+          <Field label={
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              Allocation strategy
+              <InfoTooltip text="Even spread: total units distributed evenly across the date range. Custom: set a specific amount per calendar month." />
+            </span>
+          }>
+            <Select value={form.allocationStrategy}
+              onChange={v => setForm({ ...form, allocationStrategy: v as AllocationStrategy })}
+              options={ALLOCATION_OPTIONS} />
+          </Field>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Field label={`Total ${form.unit}`}>
+            <NumericInput className="input" value={form.totalAllocation}
+              onChange={v => setForm({ ...form, totalAllocation: v })} min={0} />
+          </Field>
+          <Field label={
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              Already completed
+              <InfoTooltip text="Set this when entering a project already in progress — the number of days/hours completed before this system entry. This offsets the remaining allocation." />
+            </span>
+          }>
+            <NumericInput className="input" value={form.unitsCompleted}
+              onChange={v => setForm({ ...form, unitsCompleted: v })} min={0} />
+          </Field>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Field label={
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              Crew type
+              <InfoTooltip text="Fixed: exact head count each day. Range: minimum to maximum. Any: no crew constraint — assign as available." />
+            </span>
+          }>
+            <Select value={form.crewSizeType}
+              onChange={v => setForm({ ...form, crewSizeType: v as CrewSizeType })}
+              options={CREW_TYPE_OPTIONS} />
+          </Field>
+          <Field label={form.crewSizeType === 'range' ? 'Min crew' : 'Crew size'}>
+            <NumericInput className="input" value={form.minCrew}
+              onChange={v => setForm({ ...form, minCrew: v })} min={1} />
+          </Field>
+        </div>
+
+        {form.crewSizeType === 'range' && (
+          <Field label="Max crew">
+            <NumericInput className="input" value={form.maxCrew ?? 0}
+              onChange={v => setForm({ ...form, maxCrew: v || undefined })} min={form.minCrew} />
+          </Field>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Field label={`Charge-out rate ($ / ${form.unit === 'hours' ? 'hr' : 'day'})`}>
+            <NumericInput className="input" value={form.chargeOutRate}
+              onChange={v => setForm({ ...form, chargeOutRate: v })} min={0} />
+          </Field>
+          <Field label="Overtime">
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={form.overtimeFlag}
+                  onChange={e => setForm({ ...form, overtimeFlag: e.target.checked })} />
+                Allow
+              </label>
+              <NumericInput className="input" step="0.1" value={form.overtimeRate}
+                onChange={v => setForm({ ...form, overtimeRate: v })}
+                style={{ width: 70 }} disabled={!form.overtimeFlag} />
+              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>× rate</span>
+            </div>
+          </Field>
+        </div>
+
+        <Field label="Required skills">
+          <SkillsEditor selected={form.skills} allSkills={state.skills}
+            onChange={skills => setForm({ ...form, skills })}
+            onAddSkill={state.addSkill} />
+        </Field>
+
+        <Field label="Notes">
+          <textarea className="input" rows={2} value={form.notes ?? ''}
+            onChange={e => setForm({ ...form, notes: e.target.value || undefined })}
+            style={{ resize: 'vertical', fontFamily: 'inherit' }} />
+        </Field>
+      </Drawer>
+    </>
+  )
+}
+
+// ── ProjectDrawer ──────────────────────────────────────────────────────────────
+
+type DrawerTab = 'details' | 'sites' | 'activities'
+
+function ProjectDrawer({ projectId, state, onClose }: {
+  projectId: string
+  state: ReturnType<typeof useCCState>
+  onClose: () => void
+}) {
+  const p = state.projects.find(x => x.id === projectId)!
+  const [edit, setEdit] = useState<Project>({ ...p })
+  const [tab, setTab] = useState<DrawerTab>('details')
+  const [confirmDeleteProject, setConfirmDeleteProject] = useState(false)
+  const [confirmDeleteSite, setConfirmDeleteSite] = useState<string | null>(null)
+  const [editActivityId, setEditActivityId] = useState<string | null | 'new'>(null)
+  const [editSiteId, setEditSiteId] = useState<string | null>(null)
+  const [newSite, setNewSite] = useState({ name: '', address: '' })
+
+  const sites = state.sites.filter(s => s.projectId === projectId)
+  const activities = state.activities.filter(a => a.projectId === projectId)
+
+  const saveDetails = () => { state.updateProject(p.id, edit); onClose() }
+
+  const addSite = () => {
+    if (!newSite.name.trim()) return
+    state.addSite({
+      projectId,
+      name: newSite.name.trim(),
+      address: newSite.address.trim() || undefined,
+      active: true,
+      sortOrder: sites.length,
+    })
+    setNewSite({ name: '', address: '' })
+  }
+
+  const tabStyle = (t: DrawerTab) => ({
+    padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+    fontFamily: 'var(--font-mono)' as const, textTransform: 'uppercase' as const, letterSpacing: '0.05em',
+    background: tab === t ? 'var(--accent-soft)' : 'transparent',
+    color: tab === t ? 'var(--accent)' : 'var(--ink-3)',
+    border: '1px solid ' + (tab === t ? 'var(--accent)' : 'transparent'),
+  })
+
+  return (
+    <>
+      {confirmDeleteProject && (
+        <ConfirmDialog
+          title={`Delete "${p.name}"?`}
+          message="This will permanently delete the project, all its sites, activities, and roster assignments."
+          confirmLabel="Delete project"
+          danger
+          onConfirm={() => { state.deleteProject(p.id); onClose() }}
+          onCancel={() => setConfirmDeleteProject(false)}
+        />
+      )}
+      {confirmDeleteSite && (
+        <ConfirmDialog
+          title="Delete site?"
+          message="This will remove the site. Activities assigned to this site will become project-wide."
+          confirmLabel="Delete site"
+          danger
+          onConfirm={() => { state.deleteSite(confirmDeleteSite); setConfirmDeleteSite(null) }}
+          onCancel={() => setConfirmDeleteSite(null)}
+        />
+      )}
+
+      {editActivityId !== null && (
+        <ActivityDrawer
+          projectId={projectId}
+          activityId={editActivityId === 'new' ? null : editActivityId}
+          state={state}
+          onClose={() => setEditActivityId(null)}
+        />
+      )}
+
+      <Drawer
+        title={p.name}
+        subtitle={p.client}
+        onClose={onClose}
+        onSave={tab === 'details' ? saveDetails : undefined}
+        onDelete={tab === 'details' ? () => setConfirmDeleteProject(true) : undefined}
+      >
+        {/* Tab bar */}
+        <div style={{ display: 'flex', gap: 4, marginBottom: 18 }}>
+          <button style={tabStyle('details')} onClick={() => setTab('details')}>Details</button>
+          <button style={tabStyle('sites')} onClick={() => setTab('sites')}>
+            Sites{sites.length > 0 ? ` (${sites.length})` : ''}
+          </button>
+          <button style={tabStyle('activities')} onClick={() => setTab('activities')}>
+            Activities{activities.length > 0 ? ` (${activities.length})` : ''}
+          </button>
+        </div>
+
+        {/* Details tab */}
+        {tab === 'details' && (
+          <>
+            <Field label="Project name">
+              <input className="input" value={edit.name}
+                onChange={e => setEdit({ ...edit, name: e.target.value })} />
+            </Field>
+            <Field label="Client">
+              <input className="input" value={edit.client}
+                onChange={e => setEdit({ ...edit, client: e.target.value })} />
+            </Field>
+            <Field label="Project number (optional)">
+              <input className="input" value={edit.projectNumber ?? ''}
+                placeholder="e.g. CC-2026-04"
+                onChange={e => setEdit({ ...edit, projectNumber: e.target.value || undefined })} />
+            </Field>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <Field label="Start date">
+                <input className="input" type="date" value={edit.start}
+                  onChange={e => setEdit({ ...edit, start: e.target.value })} />
+              </Field>
+              <Field label="End date">
+                <input className="input" type="date" value={edit.end}
+                  onChange={e => setEdit({ ...edit, end: e.target.value })} />
+              </Field>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <Field label="Priority">
+                <Select value={edit.priority}
+                  onChange={v => setEdit({ ...edit, priority: v as Priority })}
+                  options={PRIORITY_OPTIONS} />
+              </Field>
+              <Field label="Contract value ($)">
+                <NumericInput className="input" value={edit.contractValue}
+                  onChange={v => setEdit({ ...edit, contractValue: v })} min={0} />
+              </Field>
+            </div>
+          </>
+        )}
+
+        {/* Sites tab */}
+        {tab === 'sites' && (
+          <>
+            {sites.length === 0 && (
+              <div style={{ color: 'var(--ink-3)', fontSize: 12, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em', paddingBottom: 14 }}>
+                No sites yet
+              </div>
+            )}
+            {sites.map(s => (
+              <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
+                {editSiteId === s.id ? (
+                  <>
+                    <input className="input" defaultValue={s.name} style={{ flex: 1 }}
+                      onBlur={e => state.updateSite(s.id, { name: e.target.value })} />
+                    <input className="input" defaultValue={s.address ?? ''} style={{ flex: 1 }}
+                      placeholder="Address (optional)"
+                      onBlur={e => state.updateSite(s.id, { address: e.target.value || undefined })} />
+                    <button className="btn" onClick={() => setEditSiteId(null)}>Done</button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>{s.name}</div>
+                      {s.address && <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{s.address}</div>}
+                    </div>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)' }}>
+                      {activities.filter(a => a.siteId === s.id).length} activities
+                    </span>
+                    <button className="iconbtn" onClick={() => setEditSiteId(s.id)}>
+                      <Icon name="edit" size={12} />
+                    </button>
+                    <button className="iconbtn" onClick={() => setConfirmDeleteSite(s.id)}
+                      style={{ color: 'var(--danger)' }}>
+                      <Icon name="trash" size={12} />
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 6 }}>
+                Add site
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input className="input" style={{ flex: 1 }} placeholder="Site name…"
+                  value={newSite.name} onChange={e => setNewSite({ ...newSite, name: e.target.value })} />
+                <input className="input" style={{ flex: 1 }} placeholder="Address (optional)"
+                  value={newSite.address} onChange={e => setNewSite({ ...newSite, address: e.target.value })} />
+                <button className="btn primary" onClick={addSite}>
+                  <Icon name="plus" size={12} /> Add
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Activities tab */}
+        {tab === 'activities' && (
+          <>
+            <button className="btn primary" style={{ marginBottom: 16 }}
+              onClick={() => setEditActivityId('new')}>
+              <Icon name="plus" size={14} /> New activity
+            </button>
+
+            {activities.length === 0 && (
+              <div style={{ color: 'var(--ink-3)', fontSize: 12, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                No activities yet — add one above
+              </div>
+            )}
+
+            {/* Group activities by site, then project-wide */}
+            {[...sites, null].map(site => {
+              const group = site
+                ? activities.filter(a => a.siteId === site.id)
+                : activities.filter(a => !a.siteId)
+              if (group.length === 0 && site !== null) return null
+
+              return (
+                <div key={site?.id ?? 'project-wide'} style={{ marginBottom: 18 }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid var(--line)' }}>
+                    {site ? site.name : (sites.length > 0 ? 'Project-wide' : 'Activities')}
+                  </div>
+                  {group.map(a => (
+                    <div key={a.id}
+                      onClick={() => setEditActivityId(a.id)}
+                      style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px', borderRadius: 8, cursor: 'pointer', marginBottom: 4 }}
+                      onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-sunken)'}
+                      onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'transparent'}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>{a.name}</div>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', display: 'flex', gap: 10 }}>
+                          <span>{a.totalAllocation}{a.unit === 'hours' ? 'h' : 'd'}</span>
+                          <span>Crew: {a.crewSizeType === 'any' ? 'any' : a.crewSizeType === 'range' ? `${a.minCrew}–${a.maxCrew}` : String(a.minCrew)}</span>
+                          <span>${a.chargeOutRate}/{a.unit === 'hours' ? 'hr' : 'day'}</span>
+                          {a.unitsCompleted > 0 && <span style={{ color: 'var(--accent)' }}>{a.unitsCompleted} done</span>}
+                        </div>
+                      </div>
+                      <span className={`pill${a.priority === 'high' ? ' accent' : ''}`} style={{ fontSize: 10 }}>
+                        <span className="dot" />{a.priority}
+                      </span>
+                      <span style={{
+                        fontFamily: 'var(--font-mono)', fontSize: 10,
+                        color: a.status === 'complete' ? 'var(--accent)' : a.status === 'on_hold' ? 'var(--warn)' : 'var(--ink-3)',
+                      }}>
+                        {a.status === 'on_hold' ? 'on hold' : a.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
+          </>
+        )}
+      </Drawer>
+    </>
+  )
+}
+
+// ── ProjectCard ────────────────────────────────────────────────────────────────
+
+function ProjectCard({ project, state, onOpen }: {
+  project: Project
+  state: ReturnType<typeof useCCState>
+  onOpen: () => void
+}) {
   const p = project
-  const budgetPct = Math.min(100, Math.round((p.spent / p.budget) * 100))
-  const monthKey = state.rosterMonth
-  const usedVisits = Object.entries(state.roster).filter(([d, assignments]) =>
-    d.startsWith(monthKey) && assignments.some(a => a.projectId === p.id)
-  ).length
-  const capacityPct = Math.min(100, Math.round((usedVisits / p.visitsPerMonth) * 100))
-  const remaining = Math.max(0, p.visitsPerMonth - usedVisits)
+  const activities = state.activities.filter(a => a.projectId === p.id)
+  const sites = state.sites.filter(s => s.projectId === p.id)
+  const activeCount = activities.filter(a => a.status === 'active').length
 
   return (
     <div className="app-card" onClick={onOpen} style={{ minHeight: 0 }}>
       <div className="app-card-top">
         <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 4 }}>{p.client}</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 4 }}>
+            {p.client}
+            {p.projectNumber && <span style={{ marginLeft: 8, opacity: 0.7 }}>{p.projectNumber}</span>}
+          </div>
           <h3 className="app-name" style={{ fontSize: 22, marginBottom: 2 }}>{p.name}</h3>
         </div>
-        <span className={`pill ${p.priority === 'high' ? 'accent' : ''}`}><span className="dot" />{p.priority}</span>
+        <span className={`pill ${p.priority === 'high' ? 'accent' : ''}`}>
+          <span className="dot" />{p.priority}
+        </span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <CapacityMeter label="Budget" pct={budgetPct} caption={`$${(p.spent / 1000).toFixed(1)}k of $${(p.budget / 1000).toFixed(1)}k`} />
-        <CapacityMeter label="Visits this month" pct={capacityPct} caption={`${usedVisits} of ${p.visitsPerMonth} · ${remaining} remain`} />
+      <div style={{ display: 'flex', gap: 20, marginBottom: 8 }}>
+        <div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 2 }}>Contract</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, letterSpacing: '-0.01em' }}>
+            ${(p.contractValue / 1000).toFixed(1)}k
+          </div>
+        </div>
+        <div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 2 }}>Activities</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, letterSpacing: '-0.01em' }}>
+            {activeCount}
+            {activities.length > activeCount && (
+              <span style={{ fontSize: 12, color: 'var(--ink-3)', marginLeft: 4 }}>/ {activities.length}</span>
+            )}
+          </div>
+        </div>
+        {sites.length > 0 && (
+          <div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 2 }}>Sites</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, letterSpacing: '-0.01em' }}>{sites.length}</div>
+          </div>
+        )}
       </div>
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', paddingTop: 6 }}>
-        <span>Unit: <b style={{ color: 'var(--ink)' }}>{p.unit}</b></span>
-        <span>Crew: <b style={{ color: 'var(--ink)' }}>{p.crewSize}</b></span>
-        <span>Allocation: <b style={{ color: 'var(--ink)' }}>{p.monthlyAllocation}{p.unit === 'hours' ? 'h' : 'd'}/mo</b></span>
-      </div>
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>
-        {(p.skills || []).map(s => <span key={s} className="skill-chip">{s}</span>)}
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        {p.start || '—'} → {p.end || '—'}
       </div>
     </div>
   )
 }
 
-function ProjectDrawer({ projectId, state, onClose }: { projectId: string; state: ReturnType<typeof useCCState>; onClose: () => void }) {
-  const p = state.projects.find(x => x.id === projectId)!
-  const [edit, setEdit] = useState<Project>(p)
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const save = () => { state.updateProject(p.id, edit); onClose() }
-  const del = () => setConfirmDelete(true)
-  return (
-    <>
-    {confirmDelete && (
-      <ConfirmDialog
-        title={`Delete ${p.name}?`}
-        message={`This will permanently remove the project from the system. Any roster assignments to "${p.name}" will also be cleared.`}
-        confirmLabel="Delete project"
-        danger
-        onConfirm={() => { state.deleteProject(p.id); onClose() }}
-        onCancel={() => setConfirmDelete(false)}
-      />
-    )}
-    <Drawer title={p.name} subtitle={p.client} onClose={onClose} onSave={save} onDelete={del}>
-      <Field label="Project name"><input className="input" value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></Field>
-      <Field label="Client"><input className="input" value={edit.client} onChange={e => setEdit({ ...edit, client: e.target.value })} /></Field>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <Field label="Start"><input className="input" type="date" value={edit.start} onChange={e => setEdit({ ...edit, start: e.target.value })} /></Field>
-        <Field label="End"><input className="input" type="date" value={edit.end} onChange={e => setEdit({ ...edit, end: e.target.value })} /></Field>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <Field label="Work unit">
-          <Select value={edit.unit} onChange={v => setEdit({ ...edit, unit: v as 'days' | 'hours' })} options={UNIT_OPTIONS} />
-        </Field>
-        <Field label="Priority">
-          <Select value={edit.priority} onChange={v => setEdit({ ...edit, priority: v as Project['priority'] })} options={PRIORITY_OPTIONS} />
-        </Field>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <Field label={`Monthly allocation (${edit.unit})`}><input className="input" type="number" value={edit.monthlyAllocation} onChange={e => setEdit({ ...edit, monthlyAllocation: +e.target.value })} /></Field>
-        <Field label="Visits per month"><input className="input" type="number" value={edit.visitsPerMonth} onChange={e => setEdit({ ...edit, visitsPerMonth: +e.target.value })} /></Field>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <Field label="Fixed crew size"><input className="input" type="number" value={edit.crewSize} onChange={e => setEdit({ ...edit, crewSize: +e.target.value })} /></Field>
-        <Field label={`Charge-out rate (per ${edit.unit === 'hours' ? 'hr' : 'day'})`}><input className="input" type="number" value={edit.chargeOutRate} onChange={e => setEdit({ ...edit, chargeOutRate: +e.target.value })} /></Field>
-      </div>
-      <Field label="Budget (AUD)"><input className="input" type="number" value={edit.budget} onChange={e => setEdit({ ...edit, budget: +e.target.value })} /></Field>
-      <Field label="Overtime">
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-            <input type="checkbox" checked={edit.overtimeFlag} onChange={e => setEdit({ ...edit, overtimeFlag: e.target.checked })} /> Allow overtime
-          </label>
-          <input className="input" type="number" step="0.1" value={edit.overtimeRate} onChange={e => setEdit({ ...edit, overtimeRate: +e.target.value })} style={{ width: 80 }} disabled={!edit.overtimeFlag} />
-          <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>× rate</span>
-        </div>
-      </Field>
-      <Field label="Required skills">
-        <SkillsEditor selected={edit.skills} allSkills={state.skills} onChange={skills => setEdit({ ...edit, skills })} onAddSkill={state.addSkill} />
-      </Field>
-    </Drawer>
-    </>
-  )
-}
+// ── AddProjectModal ────────────────────────────────────────────────────────────
 
-function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCState>; onClose: () => void }) {
+function AddProjectModal({ state, onClose }: {
+  state: ReturnType<typeof useCCState>
+  onClose: () => void
+}) {
   const [p, setP] = useState<Omit<Project, 'id'>>({
-    name: '', client: '', start: '', end: '', unit: 'days',
-    monthlyAllocation: 0, visitsPerMonth: 0, crewSize: 3,
-    chargeOutRate: 0, overtimeFlag: false, overtimeRate: 1.5,
-    priority: 'medium', budget: 0, spent: 0, skills: [],
+    name: '', client: '', start: '', end: '',
+    priority: 'medium', contractValue: 0,
   })
   const [existingClients, setExistingClients] = useState<string[]>([])
   const [newClient, setNewClient] = useState(false)
-  const [flexibleCrew, setFlexibleCrew] = useState(false)
   const [clientOpen, setClientOpen] = useState(false)
   const clientDropRef = useRef<HTMLDivElement>(null)
 
@@ -203,14 +635,15 @@ function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCSta
 
   const save = () => {
     if (!p.name.trim()) return
-    state.addProject({ ...p, crewSize: flexibleCrew ? 0 : p.crewSize })
+    state.addProject(p)
     onClose()
   }
 
   return (
     <Drawer title="New project" subtitle="Add to projects list" onClose={onClose} onSave={save} saveLabel="Create">
       <Field label="Project name">
-        <input className="input" value={p.name} onChange={e => setP({ ...p, name: e.target.value })} autoFocus />
+        <input className="input" value={p.name}
+          onChange={e => setP({ ...p, name: e.target.value })} autoFocus />
       </Field>
 
       <Field label="Client">
@@ -224,8 +657,7 @@ function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCSta
                 padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 8,
                 background: 'var(--bg-elev)', fontSize: 13, cursor: 'pointer', textAlign: 'left',
                 color: p.client ? 'var(--ink)' : 'var(--ink-3)',
-                outline: clientOpen ? '2px solid var(--accent)' : 'none',
-                outlineOffset: -1,
+                outline: clientOpen ? '2px solid var(--accent)' : 'none', outlineOffset: -1,
               }}
             >
               <span>{p.client || 'Select client…'}</span>
@@ -240,7 +672,8 @@ function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCSta
                 borderRadius: 10, boxShadow: '0 8px 24px oklch(0.18 0.015 150 / 0.12)', overflow: 'hidden',
               }}>
                 {existingClients.map(c => (
-                  <button key={c} type="button" onClick={() => { setP({ ...p, client: c }); setClientOpen(false) }}
+                  <button key={c} type="button"
+                    onClick={() => { setP({ ...p, client: c }); setClientOpen(false) }}
                     style={{
                       display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
                       fontSize: 13, background: p.client === c ? 'var(--accent-soft)' : 'transparent',
@@ -249,11 +682,10 @@ function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCSta
                     }}
                     onMouseEnter={e => { if (p.client !== c) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-sunken)' }}
                     onMouseLeave={e => { if (p.client !== c) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
-                  >
-                    {c}
-                  </button>
+                  >{c}</button>
                 ))}
-                <button type="button" onClick={() => { setNewClient(true); setP({ ...p, client: '' }); setClientOpen(false) }}
+                <button type="button"
+                  onClick={() => { setNewClient(true); setP({ ...p, client: '' }); setClientOpen(false) }}
                   style={{
                     display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
                     fontSize: 13, background: 'transparent', color: 'var(--accent)',
@@ -261,74 +693,52 @@ function AddProjectModal({ state, onClose }: { state: ReturnType<typeof useCCSta
                   }}
                   onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-soft)' }}
                   onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
-                >
-                  + New client…
-                </button>
+                >+ New client…</button>
               </div>
             )}
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 6 }}>
-            <input className="input" style={{ flex: 1 }} placeholder="New client name…" value={p.client}
-              onChange={e => setP({ ...p, client: e.target.value })} autoFocus />
-            <button className="btn" type="button" onClick={() => { setNewClient(false); setP({ ...p, client: '' }) }}>Cancel</button>
+            <input className="input" style={{ flex: 1 }} placeholder="New client name…"
+              value={p.client} onChange={e => setP({ ...p, client: e.target.value })} autoFocus />
+            <button className="btn" type="button"
+              onClick={() => { setNewClient(false); setP({ ...p, client: '' }) }}>Cancel</button>
           </div>
         )}
       </Field>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <Field label="Start date"><input className="input" type="date" value={p.start} onChange={e => setP({ ...p, start: e.target.value })} /></Field>
-        <Field label="End date"><input className="input" type="date" value={p.end} onChange={e => setP({ ...p, end: e.target.value })} /></Field>
+        <Field label="Start date">
+          <input className="input" type="date" value={p.start}
+            onChange={e => setP({ ...p, start: e.target.value })} />
+        </Field>
+        <Field label="End date">
+          <input className="input" type="date" value={p.end}
+            onChange={e => setP({ ...p, end: e.target.value })} />
+        </Field>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Priority">
-          <Select value={p.priority} onChange={v => setP({ ...p, priority: v as Project['priority'] })} options={PRIORITY_OPTIONS} />
+          <Select value={p.priority}
+            onChange={v => setP({ ...p, priority: v as Priority })}
+            options={PRIORITY_OPTIONS} />
         </Field>
-        <Field label="Work unit">
-          <Select value={p.unit} onChange={v => setP({ ...p, unit: v as 'days' | 'hours' })} options={UNIT_OPTIONS} />
-        </Field>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <Field label={`Monthly allocation (${p.unit})`}>
-          <input className="input" type="number" value={p.monthlyAllocation} onChange={e => setP({ ...p, monthlyAllocation: +e.target.value })} />
-        </Field>
-        <Field label="Visits per month">
-          <input className="input" type="number" value={p.visitsPerMonth} onChange={e => setP({ ...p, visitsPerMonth: +e.target.value })} />
+        <Field label="Contract value ($)">
+          <NumericInput className="input" value={p.contractValue}
+            onChange={v => setP({ ...p, contractValue: v })} min={0} />
         </Field>
       </div>
 
-      <Field label="Crew size">
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-            <input type="checkbox" checked={flexibleCrew} onChange={e => setFlexibleCrew(e.target.checked)} />
-            Flexible
-          </label>
-          {!flexibleCrew && (
-            <>
-              <input className="input" type="number" min="1" value={p.crewSize} onChange={e => setP({ ...p, crewSize: +e.target.value })} style={{ width: 80 }} />
-              <span style={{ fontSize: 12, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>fixed staff per day</span>
-            </>
-          )}
-        </div>
-      </Field>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <Field label={`Charge-out rate ($ per ${p.unit === 'hours' ? 'hr' : 'day'})`}>
-          <input className="input" type="number" value={p.chargeOutRate} onChange={e => setP({ ...p, chargeOutRate: +e.target.value })} />
-        </Field>
-        <Field label="Budget ($)">
-          <input className="input" type="number" value={p.budget} onChange={e => setP({ ...p, budget: +e.target.value })} />
-        </Field>
-      </div>
-
-      <Field label="Required skills">
-        <SkillsEditor selected={p.skills} allSkills={state.skills} onChange={skills => setP({ ...p, skills })} onAddSkill={state.addSkill} />
+      <Field label="Project number (optional)">
+        <input className="input" value={p.projectNumber ?? ''} placeholder="e.g. CC-2026-04"
+          onChange={e => setP({ ...p, projectNumber: e.target.value || undefined })} />
       </Field>
     </Drawer>
   )
 }
+
+// ── ProjectsPage ───────────────────────────────────────────────────────────────
 
 export default function ProjectsPage() {
   const state = useCCState()
@@ -348,44 +758,59 @@ export default function ProjectsPage() {
       <div className="subpage-top">
         <Link href="/" className="back-btn"><Icon name="back" size={16} /> Dashboard</Link>
         <div style={{ width: 1, height: 20, background: 'var(--line)' }} />
-        <span className="sp-crumb">{visible.length} of {state.projects.length} projects · capacity & budget</span>
+        <span className="sp-crumb">{visible.length} of {state.projects.length} projects</span>
         <div style={{ flex: 1 }} />
         <h2 className="sp-title">Projects</h2>
       </div>
 
       <div className="subpage-body">
         <div style={{ display: 'flex', gap: 10, marginBottom: 18, alignItems: 'center' }}>
-          <button className="btn primary" onClick={() => setShowAdd(true)}><Icon name="plus" size={14} /> New project</button>
+          <button className="btn primary" onClick={() => setShowAdd(true)}>
+            <Icon name="plus" size={14} /> New project
+          </button>
           <div className="tabs" style={{ marginBottom: 0 }}>
             <div className={`tab ${view === 'grid' ? 'active' : ''}`} onClick={() => setView('grid')}>Cards</div>
             <div className={`tab ${view === 'table' ? 'active' : ''}`} onClick={() => setView('table')}>Table</div>
           </div>
           <div style={{ flex: 1 }} />
-          <input className="input" placeholder="Search projects…" value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 240 }} />
+          <input className="input" placeholder="Search projects…" value={filter}
+            onChange={e => setFilter(e.target.value)} style={{ width: 240 }} />
         </div>
 
         {view === 'grid' ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
-            {visible.map(p => <ProjectCard key={p.id} project={p} state={state} onOpen={() => setSelected(p.id)} />)}
+            {visible.map(p => (
+              <ProjectCard key={p.id} project={p} state={state} onOpen={() => setSelected(p.id)} />
+            ))}
           </div>
         ) : (
           <table className="table">
             <thead><tr>
-              <th>Project</th><th>Client</th><th>Unit</th><th>Allocation</th><th>Crew</th><th>Budget</th><th>Spent</th><th>Priority</th>
+              <th>Project</th><th>Client</th><th>Contract value</th><th>Activities</th><th>Sites</th><th>Priority</th>
             </tr></thead>
             <tbody>
               {visible.map(p => {
-                const pct = Math.round((p.spent / p.budget) * 100)
+                const acts = state.activities.filter(a => a.projectId === p.id)
+                const ss = state.sites.filter(s => s.projectId === p.id)
                 return (
                   <tr key={p.id} onClick={() => setSelected(p.id)} style={{ cursor: 'pointer' }}>
-                    <td style={{ fontWeight: 500 }}>{p.name}</td>
+                    <td style={{ fontWeight: 500 }}>
+                      {p.name}
+                      {p.projectNumber && (
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', marginLeft: 6 }}>
+                          {p.projectNumber}
+                        </span>
+                      )}
+                    </td>
                     <td>{p.client}</td>
-                    <td className="mono">{p.unit}</td>
-                    <td className="mono">{p.monthlyAllocation}{p.unit === 'hours' ? 'h' : 'd'}/mo</td>
-                    <td className="mono">{p.crewSize}</td>
-                    <td className="mono">${(p.budget / 1000).toFixed(1)}k</td>
-                    <td><span style={{ color: pct > 90 ? 'var(--danger)' : pct > 75 ? 'var(--warn)' : 'var(--ink)' }}>{pct}%</span> <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>${(p.spent / 1000).toFixed(1)}k</span></td>
-                    <td><span className={`pill ${p.priority === 'high' ? 'accent' : ''}`}><span className="dot" />{p.priority}</span></td>
+                    <td className="mono">${(p.contractValue / 1000).toFixed(1)}k</td>
+                    <td className="mono">{acts.length}</td>
+                    <td className="mono">{ss.length}</td>
+                    <td>
+                      <span className={`pill ${p.priority === 'high' ? 'accent' : ''}`}>
+                        <span className="dot" />{p.priority}
+                      </span>
+                    </td>
                   </tr>
                 )
               })}

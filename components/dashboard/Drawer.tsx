@@ -52,7 +52,7 @@ export function Drawer({ title, subtitle, children, onClose, onSave, onDelete, o
 }
 
 type FieldProps = {
-  label: string
+  label: React.ReactNode
   children: React.ReactNode
 }
 
