@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react'
 import type {
-  CCState, Project, Site, ProjectSiteLink, ActivityType, Activity, ActivityCarryover,
+  CCState, Project, Site, ProjectSiteLink, ActivityType, Activity, ActivityAllocation, ActivityCarryover,
   Employee, Task, Roster, RosterAssignment,
   EmploymentType, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus, CarryoverStatus,
   Client, ClientStatus, ClientType,
@@ -225,6 +225,8 @@ type CCActions = {
   // Carryovers
   addCarryovers:    (items: Omit<ActivityCarryover, 'id' | 'createdAt'>[]) => Promise<void>
   updateCarryover:  (id: string, status: CarryoverStatus) => void
+  // Allocations
+  setActivityAllocations: (activityId: string, periods: { period: string; allocation: number }[]) => Promise<void>
   // Employees
   updateEmployee:   (id: string, patch: Partial<Employee>) => void
   addEmployee:      (e: Omit<Employee, 'id'>) => void
@@ -263,7 +265,7 @@ type CCContext = CCState & CCActions
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const EMPTY_STATE: CCState = {
-  projects: [], sites: [], projectSiteLinks: [], activityTypes: [], activities: [], carryovers: [],
+  projects: [], sites: [], projectSiteLinks: [], activityTypes: [], activities: [], carryovers: [], allocations: [],
   employees: [], archivedEmployees: [], skills: [], roles: [],
   tasks: [], roster: {}, rosterMonth: new Date().toISOString().slice(0, 7),
   clients: [], archivedClients: [],
@@ -334,6 +336,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         { data: taskRows },
         { data: rosterRows },
         { data: clientRows },
+        { data: allocationRows },
       ] = await Promise.all([
         supabase
           .from('staff')
@@ -389,6 +392,11 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           .select('*')
           .eq('organization_id', oid),
         supabase.from('clients').select('*').eq('organization_id', oid).order('name'),
+        supabase
+          .from('activity_allocations')
+          .select('id, activity_id, period, allocation')
+          .eq('organization_id', oid)
+          .order('period'),
       ])
 
       if (staffErr)    console.error('load staff:',     staffErr)
@@ -419,6 +427,15 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         activityTypes:     (activityTypeRows     ?? []).map(r => rowToActivityType(r    as Record<string, unknown>)),
         activities:        (activityRows     ?? []).map(r => rowToActivity(r    as Record<string, unknown>)),
         carryovers:        (carryoverRows    ?? []).map(r => rowToCarryover(r   as Record<string, unknown>)),
+        allocations: (allocationRows ?? []).map(r => {
+          const row = r as Record<string, unknown>
+          return {
+            id: row.id as string,
+            activityId: row.activity_id as string,
+            period: row.period as string,
+            allocation: row.allocation as number,
+          } satisfies ActivityAllocation
+        }),
         skills:            (skillRows        ?? []).map(r => (r as Record<string, unknown>).name as string),
         roles:             (roleRows         ?? []).map(r => (r as Record<string, unknown>).name as string),
         tasks:             (taskRows         ?? []).map(r => {
@@ -778,12 +795,17 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
     function deleteActivity(id: string) {
       setState(prev => ({
         ...prev,
-        activities: prev.activities.filter(a => a.id !== id),
+        activities:  prev.activities.filter(a => a.id !== id),
+        allocations: prev.allocations.filter(a => a.activityId !== id),
       }))
       db.from('activities')
         .delete()
         .eq('id', id)
         .then(({ error }) => { if (error) console.error('deleteActivity:', error) })
+      db.from('activity_allocations')
+        .delete()
+        .eq('activity_id', id)
+        .then(({ error }) => { if (error) console.error('deleteActivity (allocations):', error) })
     }
 
     // ── Carryovers ─────────────────────────────────────────────
@@ -838,6 +860,52 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .update({ status })
         .eq('id', id)
         .then(({ error }) => { if (error) console.error('updateCarryover:', error) })
+    }
+
+    async function setActivityAllocations(activityId: string, periods: { period: string; allocation: number }[]) {
+      const { orgId: oid } = ref()
+      // Optimistic update: replace all allocations for this activity
+      setState(prev => ({
+        ...prev,
+        allocations: [
+          ...prev.allocations.filter(a => a.activityId !== activityId),
+          ...periods.map((p, i) => ({ id: `temp-${activityId}-${i}`, activityId, period: p.period, allocation: p.allocation })),
+        ],
+      }))
+      // Delete existing rows for this activity
+      const { error: delErr } = await db
+        .from('activity_allocations')
+        .delete()
+        .eq('activity_id', activityId)
+        .eq('organization_id', oid)
+      if (delErr) { console.error('setActivityAllocations delete:', delErr); return }
+      if (periods.length === 0) return
+      // Insert new rows
+      const rows = periods.map(p => ({
+        organization_id: oid,
+        activity_id: activityId,
+        period: p.period,
+        allocation: p.allocation,
+      }))
+      const { data: inserted, error: insErr } = await db
+        .from('activity_allocations')
+        .insert(rows)
+        .select('id, activity_id, period, allocation')
+      if (insErr) { console.error('setActivityAllocations insert:', insErr); return }
+      // Replace temp IDs with real IDs
+      const real = (inserted ?? []) as Record<string, unknown>[]
+      setState(prev => ({
+        ...prev,
+        allocations: [
+          ...prev.allocations.filter(a => a.activityId !== activityId),
+          ...real.map(r => ({
+            id: r.id as string,
+            activityId: r.activity_id as string,
+            period: r.period as string,
+            allocation: r.allocation as number,
+          })),
+        ],
+      }))
     }
 
     // ── Employees ──────────────────────────────────────────────
@@ -1306,6 +1374,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       deleteActivity,
       addCarryovers,
       updateCarryover,
+      setActivityAllocations,
       updateEmployee,
       addEmployee,
       deleteEmployee,

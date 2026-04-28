@@ -10,13 +10,27 @@ import { Select } from '@/components/dashboard/Select'
 import { NumericInput } from '@/components/dashboard/NumericInput'
 import { InfoTooltip } from '@/components/dashboard/InfoTooltip'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
-import type { Project, Site, Activity, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus } from '@/lib/types'
+import type { Project, Site, Activity, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus, ActivityType } from '@/lib/types'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function projectSites(state: ReturnType<typeof useCCState>, projectId: string): Site[] {
   const ids = new Set(state.projectSiteLinks.filter(l => l.projectId === projectId).map(l => l.siteId))
   return state.sites.filter(s => ids.has(s.id))
+}
+
+function monthsBetween(start: string, end: string): string[] {
+  const months: string[] = []
+  if (!start || !end) return months
+  const s = new Date(start)
+  const e = new Date(end)
+  const cur = new Date(s.getFullYear(), s.getMonth(), 1)
+  const last = new Date(e.getFullYear(), e.getMonth(), 1)
+  while (cur <= last) {
+    months.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`)
+    cur.setMonth(cur.getMonth() + 1)
+  }
+  return months
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -160,6 +174,93 @@ function SiteSearchDropdown({ linkedIds, allOrgSites, onLink, onCreateAndLink }:
   )
 }
 
+// ── ActivityTypeahead ──────────────────────────────────────────────────────────
+
+function ActivityTypeahead({ value, displayName, activityTypes, onChange, onAddNew }: {
+  value: string
+  displayName?: string
+  activityTypes: ActivityType[]
+  onChange: (id: string, name: string) => void
+  onAddNew: (name: string) => Promise<string>
+}) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const selected = activityTypes.find(t => t.id === value)
+  const filtered = query
+    ? activityTypes.filter(t => t.name.toLowerCase().includes(query.toLowerCase()))
+    : activityTypes
+  const showAdd = query.trim() && !activityTypes.some(t => t.name.toLowerCase() === query.trim().toLowerCase())
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <input
+        className="input"
+        placeholder="Search or add activity…"
+        value={open ? query : (selected?.name ?? displayName ?? '')}
+        onFocus={() => { setQuery(''); setOpen(true) }}
+        onChange={e => { setQuery(e.target.value); setOpen(true) }}
+        readOnly={creating}
+        style={{ width: '100%' }}
+      />
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 200,
+          background: 'var(--bg-elev)', border: '1px solid var(--line)',
+          borderRadius: 10, boxShadow: '0 8px 24px oklch(0.18 0.015 150 / 0.12)',
+          maxHeight: 200, overflowY: 'auto', overflow: 'hidden',
+        }}>
+          {filtered.map(t => (
+            <button key={t.id} type="button"
+              onMouseDown={e => { e.preventDefault(); onChange(t.id, t.name); setOpen(false); setQuery('') }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
+                fontSize: 13, background: value === t.id ? 'var(--accent-soft)' : 'transparent',
+                color: value === t.id ? 'var(--accent)' : 'var(--ink)', cursor: 'pointer',
+                border: 'none', borderBottom: '1px solid var(--line)',
+              }}
+              onMouseEnter={e => { if (value !== t.id) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-sunken)' }}
+              onMouseLeave={e => { if (value !== t.id) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+            >{t.name}</button>
+          ))}
+          {filtered.length === 0 && !showAdd && (
+            <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>No activities found</div>
+          )}
+          {showAdd && (
+            <button type="button"
+              onMouseDown={async e => {
+                e.preventDefault()
+                setCreating(true)
+                const newId = await onAddNew(query.trim())
+                onChange(newId, query.trim())
+                setOpen(false); setQuery(''); setCreating(false)
+              }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
+                fontSize: 13, background: 'transparent', color: 'var(--accent)',
+                cursor: 'pointer', border: 'none', fontWeight: 500,
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-soft)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+            >{creating ? 'Adding…' : `+ Add "${query.trim()}" to activities`}</button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── ActivityDrawer ─────────────────────────────────────────────────────────────
 
 type ActivityFormState = Omit<Activity, 'id'>
@@ -199,6 +300,22 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
   const existing = activityId ? state.activities.find(a => a.id === activityId) : null
   const [form, setForm] = useState<ActivityFormState>(existing ? { ...existing } : emptyActivity(projectId))
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [pendingTypeName, setPendingTypeName] = useState<string | null>(null)
+  const [customAllocs, setCustomAllocs] = useState<Record<string, number>>(() => {
+    if (!activityId) return {}
+    return Object.fromEntries(
+      state.allocations.filter(a => a.activityId === activityId).map(a => [a.period, a.allocation])
+    )
+  })
+
+  useEffect(() => {
+    if (!pendingTypeName) return
+    const found = state.activityTypes.find(t => t.name === pendingTypeName)
+    if (found) {
+      setForm(prev => ({ ...prev, activityTypeId: found.id, name: found.name }))
+      setPendingTypeName(null)
+    }
+  }, [state.activityTypes, pendingTypeName])
 
   const sites = projectSites(state, projectId)
   const siteOptions = [
@@ -206,10 +323,15 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
     ...sites.map(s => ({ value: s.id, label: s.name })),
   ]
 
-  const save = () => {
-    if (!form.name.trim()) return
+  const save = async () => {
+    if (!form.name.trim() && !form.activityTypeId) return
     if (existing) {
       state.updateActivity(existing.id, form)
+      if (form.allocationStrategy === 'custom') {
+        const months = monthsBetween(form.start, form.end)
+        const periods = months.map(m => ({ period: m, allocation: customAllocs[m] ?? 0 }))
+        await state.setActivityAllocations(existing.id, periods)
+      }
     } else {
       state.addActivity(form)
     }
@@ -236,15 +358,18 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
         onDelete={existing ? () => setConfirmDelete(true) : undefined}
         saveLabel={existing ? 'Save' : 'Add activity'}
       >
-        <Field label="Activity type (optional)">
-          <Select value={form.activityTypeId ?? ''}
-            onChange={v => setForm({ ...form, activityTypeId: v || undefined })}
-            options={[{ value: '', label: 'None' }, ...state.activityTypes.map(t => ({ value: t.id, label: t.name }))]} />
-        </Field>
-
-        <Field label="Activity name">
-          <input className="input" value={form.name}
-            onChange={e => setForm({ ...form, name: e.target.value })} autoFocus />
+        <Field label="Activity">
+          <ActivityTypeahead
+            value={form.activityTypeId ?? ''}
+            displayName={form.name}
+            activityTypes={state.activityTypes}
+            onChange={(id, name) => setForm({ ...form, activityTypeId: id, name })}
+            onAddNew={async (name) => {
+              state.addActivityType(name)
+              setPendingTypeName(name)
+              return '__pending__'
+            }}
+          />
         </Field>
 
         <Field label="Priority">
@@ -294,6 +419,49 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
           <NumericInput className="input" value={form.totalAllocation}
             onChange={v => setForm({ ...form, totalAllocation: v })} min={0} />
         </Field>
+
+        {form.allocationStrategy === 'custom' && (
+          <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: 4 }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
+              Monthly allocation
+            </div>
+            {!form.start || !form.end ? (
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>Set start and end dates to configure monthly allocation</div>
+            ) : (() => {
+              const months = monthsBetween(form.start, form.end)
+              const total = months.reduce((s, m) => s + (customAllocs[m] ?? 0), 0)
+              return (
+                <>
+                  {months.map(m => {
+                    const [y, mo] = m.split('-')
+                    const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })
+                    return (
+                      <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                        <div style={{ width: 80, fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{label}</div>
+                        <NumericInput className="input" style={{ width: 80 }} min={0}
+                          value={customAllocs[m] ?? 0}
+                          onChange={v => setCustomAllocs(prev => ({ ...prev, [m]: v }))} />
+                        <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{form.unit}</span>
+                      </div>
+                    )
+                  })}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)', fontSize: 12 }}>
+                    <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>Total allocated</span>
+                    <span style={{ fontWeight: 600, color: total === form.totalAllocation ? 'var(--accent)' : 'var(--warn)' }}>
+                      {total} / {form.totalAllocation} {form.unit}
+                      {total !== form.totalAllocation && <span style={{ color: 'var(--warn)', marginLeft: 6, fontSize: 11 }}>({total > form.totalAllocation ? '+' : ''}{total - form.totalAllocation})</span>}
+                    </span>
+                  </div>
+                  {!existing && (
+                    <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>
+                      Monthly allocations will be saved after you create the activity and reopen it.
+                    </div>
+                  )}
+                </>
+              )
+            })()}
+          </div>
+        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Field label={
@@ -595,6 +763,7 @@ function ProjectDrawer({ projectId, state, onClose }: {
 type PendingActivity = {
   name: string
   activityTypeId?: string
+  siteKey: string
   priority: Priority
   unit: WorkUnit
   allocationStrategy: AllocationStrategy
@@ -631,7 +800,7 @@ function AddProjectModal({ state, onClose }: {
   const [showActivityForm, setShowActivityForm] = useState(false)
   const [expandedActivityIdx, setExpandedActivityIdx] = useState<number | null>(null)
   const [activityForm, setActivityForm] = useState<PendingActivity>({
-    name: '', activityTypeId: undefined, priority: 'medium', unit: 'days',
+    name: '', activityTypeId: undefined, siteKey: '', priority: 'medium', unit: 'days',
     allocationStrategy: 'even', totalAllocation: 0, crewSizeType: 'fixed',
     minCrew: 1, maxCrew: undefined, chargeOutRate: 0,
     overtimeFlag: false, overtimeRate: 1.5, skills: [], start: '', end: '',
@@ -696,11 +865,19 @@ function AddProjectModal({ state, onClose }: {
     for (const siteName of pendingSiteNames) {
       await state.createAndLinkSite(projectId, siteName, undefined, selectedClientId)
     }
+    // Build siteKey → realId map
+    const resolvedSiteIds: Record<string, string> = {}
+    selectedSiteIds.forEach(id => { resolvedSiteIds[id] = id })
+    pendingSiteNames.forEach((name, i) => {
+      const site = state.sites.find(s => s.name === name && s.clientId === selectedClientId)
+      if (site) resolvedSiteIds[`pending:${i}`] = site.id
+    })
     // Create pending activities
     for (const act of pendingActivities) {
+      const resolvedSiteId = act.siteKey ? resolvedSiteIds[act.siteKey] : undefined
       await state.addActivity({
         projectId,
-        siteId: undefined,
+        siteId: resolvedSiteId,
         activityTypeId: act.activityTypeId,
         name: act.name,
         allocationStrategy: act.allocationStrategy,
@@ -864,8 +1041,15 @@ function AddProjectModal({ state, onClose }: {
               onClick={() => setExpandedActivityIdx(expandedActivityIdx === idx ? null : idx)}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 500 }}>{a.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {a.activityTypeId ? (state.activityTypes.find(t => t.id === a.activityTypeId)?.name ?? '') : ''}
+                  {a.siteKey && (
+                    <span>
+                      {a.siteKey.startsWith('pending:')
+                        ? pendingSiteNames[parseInt(a.siteKey.split(':')[1])] + ' (new)'
+                        : state.sites.find(s => s.id === a.siteKey)?.name}
+                    </span>
+                  )}
                   {a.start && a.end ? ` · ${a.start} → ${a.end}` : ''}
                 </div>
               </div>
@@ -892,15 +1076,40 @@ function AddProjectModal({ state, onClose }: {
         {/* Add activity form */}
         {showActivityForm ? (
           <div style={{ border: '1px solid var(--accent)', borderRadius: 10, padding: '14px', marginBottom: 8 }}>
-            <Field label="Activity type (optional)">
-              <Select value={activityForm.activityTypeId ?? ''}
-                onChange={v => setActivityForm({ ...activityForm, activityTypeId: v || undefined })}
-                options={[{ value: '', label: 'None' }, ...state.activityTypes.map(t => ({ value: t.id, label: t.name }))]} />
+            <Field label="Activity">
+              <ActivityTypeahead
+                value={activityForm.activityTypeId ?? ''}
+                displayName={activityForm.name}
+                activityTypes={state.activityTypes}
+                onChange={(id, name) => setActivityForm({ ...activityForm, activityTypeId: id, name })}
+                onAddNew={async (name) => {
+                  state.addActivityType(name)
+                  await new Promise(r => setTimeout(r, 100))
+                  const found = state.activityTypes.find(t => t.name === name)
+                  return found?.id ?? name
+                }}
+              />
             </Field>
-            <Field label="Activity name">
-              <input className="input" value={activityForm.name} autoFocus
-                onChange={e => setActivityForm({ ...activityForm, name: e.target.value })} />
-            </Field>
+            {(() => {
+              const siteOpts = [
+                { value: '', label: 'Select site…' },
+                ...selectedSiteIds.map(id => ({
+                  value: id,
+                  label: state.sites.find(s => s.id === id)?.name ?? id,
+                })),
+                ...pendingSiteNames.map((name, i) => ({
+                  value: `pending:${i}`,
+                  label: `${name} (new)`,
+                })),
+              ]
+              return (
+                <Field label="Site">
+                  <Select value={activityForm.siteKey ?? ''}
+                    onChange={v => setActivityForm({ ...activityForm, siteKey: v })}
+                    options={siteOpts} />
+                </Field>
+              )
+            })()}
             <Field label="Priority">
               <Select value={activityForm.priority}
                 onChange={v => setActivityForm({ ...activityForm, priority: v as Priority })}
@@ -964,11 +1173,12 @@ function AddProjectModal({ state, onClose }: {
             </Field>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn primary" type="button"
-                disabled={!activityForm.name.trim()}
+                disabled={!activityForm.name.trim() || !activityForm.siteKey}
                 onClick={() => {
                   if (!activityForm.name.trim()) return
+                  if (!activityForm.siteKey) return
                   setPendingActivities(prev => [...prev, { ...activityForm }])
-                  setActivityForm({ name: '', activityTypeId: undefined, priority: 'medium', unit: 'days', allocationStrategy: 'even', totalAllocation: 0, crewSizeType: 'fixed', minCrew: 1, maxCrew: undefined, chargeOutRate: 0, overtimeFlag: false, overtimeRate: 1.5, skills: [], start: '', end: '', notes: undefined })
+                  setActivityForm({ name: '', activityTypeId: undefined, siteKey: '', priority: 'medium', unit: 'days', allocationStrategy: 'even', totalAllocation: 0, crewSizeType: 'fixed', minCrew: 1, maxCrew: undefined, chargeOutRate: 0, overtimeFlag: false, overtimeRate: 1.5, skills: [], start: '', end: '', notes: undefined })
                   setShowActivityForm(false)
                 }}>
                 Add activity
