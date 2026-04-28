@@ -6,6 +6,7 @@ import { Icon } from '@/components/icons/Icon'
 import { Drawer, Field } from '@/components/dashboard/Drawer'
 import { Select } from '@/components/dashboard/Select'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
+import { NumericInput } from '@/components/dashboard/NumericInput'
 import { createClient } from '@/lib/supabase/client'
 import type { InventoryItem } from '@/lib/types'
 
@@ -183,13 +184,13 @@ function ItemDrawer({
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
           <Field label="Quantity">
-            <input className="input" type="number" min={0} step="any" value={form.quantity} onChange={e => setForm({ ...form, quantity: +e.target.value })} />
+            <NumericInput className="input" min={0} step="any" value={form.quantity} onChange={v => setForm({ ...form, quantity: v })} />
           </Field>
           <Field label="Unit">
             <Select value={form.unit} onChange={v => setForm({ ...form, unit: v })} options={UNIT_OPTIONS} />
           </Field>
           <Field label="Min stock (alert)">
-            <input className="input" type="number" min={0} step="any" value={form.minStock} onChange={e => setForm({ ...form, minStock: +e.target.value })} />
+            <NumericInput className="input" min={0} step="any" value={form.minStock} onChange={v => setForm({ ...form, minStock: v })} />
           </Field>
         </div>
         <Field label="Notes">
