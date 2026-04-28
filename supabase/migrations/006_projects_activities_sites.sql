@@ -1,7 +1,11 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Migration: 006_projects_activities_sites
--- Introduces a three-tier project hierarchy: Project → Sites → Activities.
+-- Introduces a three-tier project hierarchy: Project → Project Sites → Activities.
 -- Adds carry-forward queue, custom allocations, and cost entries for margins.
+--
+-- NOTE: The DB already has a `sites` table used by the inspection/field system.
+-- Our "project delivery sites" table is therefore named `project_sites` to avoid
+-- the clash. All app code references `project_sites` for this concept.
 --
 -- client_contracts retains its existing scheduling/rate columns so the running
 -- app continues to work during the code migration. Those columns are cleaned
@@ -16,10 +20,11 @@ ALTER TABLE client_contracts
   ADD COLUMN IF NOT EXISTS project_number text;
 
 
--- ── Section 2: Sites ──────────────────────────────────────────────────────────
--- Physical locations within a project. A project may have one or many sites.
+-- ── Section 2: Project sites ──────────────────────────────────────────────────
+-- Delivery locations within a project contract. Distinct from the inspection
+-- `sites` table — those are physical field sites shared across clients.
 
-CREATE TABLE IF NOT EXISTS sites (
+CREATE TABLE IF NOT EXISTS project_sites (
   id              uuid        PRIMARY KEY DEFAULT uuid_generate_v4(),
   organization_id uuid        NOT NULL REFERENCES organizations(id),
   project_id      uuid        NOT NULL REFERENCES client_contracts(id) ON DELETE CASCADE,
@@ -32,8 +37,8 @@ CREATE TABLE IF NOT EXISTS sites (
   updated_at      timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS sites_project_id_idx ON sites (project_id);
-CREATE INDEX IF NOT EXISTS sites_org_id_idx     ON sites (organization_id);
+CREATE INDEX IF NOT EXISTS project_sites_project_id_idx ON project_sites (project_id);
+CREATE INDEX IF NOT EXISTS project_sites_org_id_idx     ON project_sites (organization_id);
 
 
 -- ── Section 3: Activity types ─────────────────────────────────────────────────
@@ -50,14 +55,14 @@ CREATE TABLE IF NOT EXISTS activity_types (
 
 
 -- ── Section 4: Activities ─────────────────────────────────────────────────────
--- Work packages within a project, optionally scoped to a site.
+-- Work packages within a project, optionally scoped to a project site.
 -- All scheduling, crew, rate, and skill configuration lives here, not on the project.
 
 CREATE TABLE IF NOT EXISTS activities (
   id                  uuid        PRIMARY KEY DEFAULT uuid_generate_v4(),
   organization_id     uuid        NOT NULL REFERENCES organizations(id),
   project_id          uuid        NOT NULL REFERENCES client_contracts(id) ON DELETE CASCADE,
-  site_id             uuid        REFERENCES sites(id) ON DELETE SET NULL,
+  site_id             uuid        REFERENCES project_sites(id) ON DELETE SET NULL,
   activity_type_id    uuid        REFERENCES activity_types(id) ON DELETE SET NULL,
   name                text        NOT NULL,
 
@@ -153,12 +158,12 @@ CREATE INDEX IF NOT EXISTS cost_entries_org_id_idx      ON cost_entries (organiz
 
 
 -- ── Section 8: Extend roster_assignments ──────────────────────────────────────
--- Link each assignment to a specific activity and optionally a site.
+-- Link each assignment to a specific activity and optionally a project site.
 -- Both columns are nullable so all existing assignments remain valid without
 -- any data migration.
 
 ALTER TABLE roster_assignments
-  ADD COLUMN IF NOT EXISTS activity_id uuid REFERENCES activities(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS site_id     uuid REFERENCES sites(id)      ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS activity_id uuid REFERENCES activities(id)     ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS site_id     uuid REFERENCES project_sites(id)  ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS roster_assignments_activity_id_idx ON roster_assignments (activity_id);
