@@ -1,22 +1,59 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
+import { useSettings } from '@/lib/store/SettingsContext'
 import { Icon } from '@/components/icons/Icon'
+import { createClient } from '@/lib/supabase/client'
 
 // ── App definitions ────────────────────────────────────────────
-const APPS = [
-  { id: 'roster', href: '/rostering', name: 'Rostering', icon: 'roster' as const, desc: 'Monthly crew scheduling by project' },
-  { id: 'projects', href: '/projects', name: 'Projects', icon: 'projects' as const, desc: 'Live project list, capacity & budget' },
-  { id: 'employees', href: '/employees', name: 'Employees', icon: 'employees' as const, desc: 'Team details, skills & availability' },
-  { id: 'tender', href: '/tendering', name: 'Tendering', icon: 'tender' as const, desc: 'Live bids, proposals & submissions' },
-  { id: 'staff', href: 'https://constance-reporting.vercel.app/', name: 'Staff Reporting', icon: 'staff' as const, desc: 'Daily reports, timesheets & incident logs' },
-  { id: 'finance', href: '/finances', name: 'Finances', icon: 'finance' as const, desc: 'P&L, invoicing, cash position' },
-  { id: 'fleet', href: '/fleet', name: 'Fleet & Equipment', icon: 'fleet' as const, desc: 'Vehicles, servicing & live locations' },
+const APPS_OPERATIONS = [
+  { id: 'roster',    href: '/rostering',  name: 'Rostering',      icon: 'roster'    as const, desc: 'Monthly crew scheduling by project' },
+  { id: 'staff',     href: 'https://constance-reporting.vercel.app/', name: 'Staff Reporting', icon: 'staff' as const, desc: 'Daily reports, timesheets & incident logs' },
+  { id: 'tender',    href: '/tendering',  name: 'Tendering',      icon: 'tender'    as const, desc: 'Live bids, proposals & submissions', comingSoon: true },
 ]
 
+const APPS_MANAGEMENT = [
+  { id: 'employees', href: '/employees',  name: 'Employees',      icon: 'employees' as const, desc: 'Team details, skills & availability' },
+  { id: 'clients',   href: '/clients',    name: 'Clients',        icon: 'employees' as const, desc: 'Client directory, contacts & sites' },
+  { id: 'projects',  href: '/projects',   name: 'Projects',       icon: 'projects'  as const, desc: 'Live project list, capacity & budget' },
+  { id: 'finance',   href: '/finances',   name: 'Finances',       icon: 'finance'   as const, desc: 'P&L, invoicing, cash position', comingSoon: true },
+]
+
+const APPS_ASSETS = [
+  { id: 'fleet',     href: '/fleet',      name: 'Fleet & Equipment', icon: 'fleet'  as const, desc: 'Vehicles, servicing & live locations', comingSoon: true },
+  { id: 'inventory', href: '/inventory',  name: 'Inventory',      icon: 'inventory' as const, desc: 'Stock levels, consumables & equipment', comingSoon: true },
+]
+
+type AppEntry = { id: string; href: string; name: string; icon: 'roster' | 'tender' | 'staff' | 'finance' | 'fleet' | 'inventory' | 'employees' | 'projects' | 'tasks' | 'back' | 'arrow' | 'search' | 'bell' | 'settings' | 'close' | 'x' | 'plus' | 'filter' | 'download' | 'check' | 'trash' | 'edit' | 'cloud' | 'archive' | 'unarchive' | 'lock'; desc: string; comingSoon?: boolean }
+
 type AppStats = Record<string, { statVal?: string | number; stat?: string; badge?: string | null; badgeKind?: string }>
+
+type HomeSummary = {
+  outstandingAmount: number
+  outstandingCount: number
+  ytdRevenue: number
+  liveTenders: number
+  livePipeline: number
+  nextTenderDeadline: string | null
+  totalVehicles: number
+  inServiceVehicles: number
+  serviceDue: boolean
+}
+
+// ── Helpers ────────────────────────────────────────────────────
+function fmt(n: number): string {
+  if (n >= 1000000) return `$${(n / 1000000).toFixed(1)}m`
+  if (n >= 1000) return `$${Math.round(n / 1000)}k`
+  return `$${n}`
+}
+
+function nextDueLabel(dateStr: string | null): string | null {
+  if (!dateStr) return null
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  return `Due ${days[new Date(dateStr).getDay()]}`
+}
 
 // ── Sparkline ─────────────────────────────────────────────────
 function Spark({ data, color }: { data: number[]; color?: string }) {
@@ -31,153 +68,279 @@ function Spark({ data, color }: { data: number[]; color?: string }) {
   )
 }
 
-// ── KPI widgets ────────────────────────────────────────────────
-function TenderPipelineWidget() {
-  const actuals = [172, 186, 201, 194, 218, 232]
-  const predicted = 258
-  const lastMonth = actuals[actuals.length - 1]
-  const pctChange = ((predicted - lastMonth) / lastMonth) * 100
-  const up = pctChange >= 0
-  return (
-    <div className="kpi">
-      <div className="kpi-label">Predicted revenue — next month</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <div className="kpi-value">${predicted}k</div>
-        <div style={{ fontSize: 13, color: up ? 'var(--ok)' : 'var(--danger)', fontWeight: 500 }}>
-          {up ? '▲' : '▼'} {Math.abs(pctChange).toFixed(1)}%
-        </div>
-      </div>
-      <div className="kpi-delta">{up ? 'Higher' : 'Lower'} than last month (${lastMonth}k)</div>
-      <div className="kpi-spark"><Spark data={[...actuals, predicted]} /></div>
-    </div>
-  )
+// ── WMO weather code helpers ───────────────────────────────────
+function wmoIcon(code: number): string {
+  if (code === 0) return '☀'
+  if (code <= 2) return '🌤'
+  if (code === 3) return '☁'
+  if (code <= 48) return '🌫'
+  if (code <= 55) return '🌦'
+  if (code <= 67) return '🌧'
+  if (code <= 77) return '❄'
+  if (code <= 82) return '🌦'
+  return '⛈'
 }
 
+function wmoDesc(code: number): string {
+  if (code === 0) return 'clear sky'
+  if (code <= 2) return 'partly cloudy'
+  if (code === 3) return 'overcast'
+  if (code <= 48) return 'foggy'
+  if (code <= 55) return 'drizzle'
+  if (code <= 67) return 'rain'
+  if (code <= 77) return 'snow'
+  if (code <= 82) return 'showers'
+  return 'thunderstorm'
+}
+
+function windDirLabel(deg: number): string {
+  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+  return dirs[Math.round(deg / 45) % 8]
+}
+
+type WeatherDay = { day: string; high: number; icon: string }
+type WeatherData = {
+  temp: number
+  desc: string
+  windSpeed: number
+  windDir: string
+  rainPct: number
+  forecast: WeatherDay[]
+}
+
+// ── Weather widget — Open-Meteo, Camden NSW ────────────────────
 function WeatherWidget() {
-  const forecast = [
-    ['Mon', '21°', '☀'], ['Tue', '23°', '☀'], ['Wed', '19°', '⛅'],
-    ['Thu', '17°', '🌧'], ['Fri', '18°', '⛅'], ['Sat', '20°', '☀'],
-  ] as const
+  const [wx, setWx] = useState<WeatherData | null>(null)
+
+  useEffect(() => {
+    const url =
+      'https://api.open-meteo.com/v1/forecast' +
+      '?latitude=-34.0519&longitude=150.6958' +
+      '&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m' +
+      '&daily=weather_code,temperature_2m_max,precipitation_probability_max' +
+      '&timezone=Australia%2FSydney&forecast_days=7'
+    fetch(url)
+      .then(r => r.json())
+      .then(data => {
+        const c = data.current
+        const d = data.daily
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+        const forecast: WeatherDay[] = (d.time as string[]).slice(1, 7).map((t: string, i: number) => ({
+          day: dayNames[new Date(t + 'T12:00:00').getDay()],
+          high: Math.round(d.temperature_2m_max[i + 1]),
+          icon: wmoIcon(d.weather_code[i + 1]),
+        }))
+        setWx({
+          temp: Math.round(c.temperature_2m),
+          desc: wmoDesc(c.weather_code),
+          windSpeed: Math.round(c.wind_speed_10m),
+          windDir: windDirLabel(c.wind_direction_10m),
+          rainPct: d.precipitation_probability_max[0] ?? 0,
+          forecast,
+        })
+      })
+      .catch(() => {})
+  }, [])
+
   return (
     <div className="kpi">
       <div className="kpi-label">Weather — Camden field office</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <div className="kpi-value">19°</div>
-        <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>partly cloudy</div>
-      </div>
-      <div className="kpi-delta">Light winds SE · 12 km/h · 0% rain</div>
-      <div style={{ display: 'flex', gap: 4, marginTop: 10, justifyContent: 'space-between' }}>
-        {forecast.map(([d, t, icon]) => (
-          <div key={d} style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            <div>{d}</div>
-            <div style={{ fontSize: 13, margin: '3px 0' }}>{icon}</div>
-            <div style={{ color: 'var(--ink)', fontSize: 11 }}>{t}</div>
+      {wx ? (
+        <>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <div className="kpi-value">{wx.temp}°</div>
+            <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>{wx.desc}</div>
           </div>
-        ))}
-      </div>
+          <div className="kpi-delta">
+            {wx.windDir} winds · {wx.windSpeed} km/h · {wx.rainPct}% rain
+          </div>
+          <div style={{ display: 'flex', gap: 4, marginTop: 10, justifyContent: 'space-between' }}>
+            {wx.forecast.map(f => (
+              <div key={f.day} style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <div>{f.day}</div>
+                <div style={{ fontSize: 13, margin: '3px 0' }}>{f.icon}</div>
+                <div style={{ color: 'var(--ink)', fontSize: 11 }}>{f.high}°</div>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div style={{ color: 'var(--ink-3)', fontSize: 12, marginTop: 8 }}>Loading…</div>
+      )}
     </div>
   )
 }
 
 // ── Layout variants ────────────────────────────────────────────
-function AppGridCards({ stats }: { stats: AppStats }) {
+function AppGridCards({ stats, apps }: { stats: AppStats; apps: AppEntry[] }) {
   return (
     <div className="app-grid">
-      {APPS.map(app => {
+      {apps.map(app => {
         const s = stats[app.id] || {}
-        return (
-          <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
-            <div className="app-card">
-              <div className="app-card-top">
-                <div className="app-icon"><Icon name={app.icon} /></div>
-                {s.badge && <span className={`app-badge ${s.badgeKind || ''}`}>{s.badge}</span>}
-              </div>
-              <h3 className="app-name">{app.name}</h3>
-              <p className="app-desc">{app.desc}</p>
-              <div className="app-footer">
-                <span className="app-stat"><b>{s.statVal ?? '—'}</b>{s.stat || ''}</span>
-                <span className="app-arrow"><Icon name="arrow" size={14} /></span>
-              </div>
+        const card = (
+          <div className="app-card" style={app.comingSoon ? { opacity: 0.55, cursor: 'default', pointerEvents: 'none' } : undefined}>
+            <div className="app-card-top">
+              <div className="app-icon"><Icon name={app.icon} /></div>
+              {app.comingSoon
+                ? <span className="app-badge">Coming soon</span>
+                : s.badge && <span className={`app-badge ${s.badgeKind || ''}`}>{s.badge}</span>}
             </div>
-          </Link>
+            <h3 className="app-name">{app.name}</h3>
+            <p className="app-desc">{app.desc}</p>
+            <div className="app-footer">
+              {app.comingSoon
+                ? <span className="app-stat" style={{ color: 'var(--ink-4)', fontStyle: 'italic' }}>In development</span>
+                : <><span className="app-stat"><b>{s.statVal ?? '—'}</b>{s.stat || ''}</span><span className="app-arrow"><Icon name="arrow" size={14} /></span></>}
+            </div>
+          </div>
         )
+        return app.comingSoon
+          ? <div key={app.id} style={{ textDecoration: 'none' }}>{card}</div>
+          : <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{card}</Link>
       })}
     </div>
   )
 }
 
-function AppListRows({ stats }: { stats: AppStats }) {
+function AppListRows({ stats, apps }: { stats: AppStats; apps: AppEntry[] }) {
   return (
     <div className="app-list">
-      {APPS.map(app => {
+      {apps.map(app => {
         const s = stats[app.id] || {}
-        return (
-          <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
-            <div className="app-row">
-              <div className="app-icon"><Icon name={app.icon} size={18} /></div>
-              <div>
-                <div className="row-name">{app.name}</div>
-                <div className="row-desc">{app.desc}</div>
-              </div>
-              <div className="row-stat"><b>{s.statVal ?? '—'}</b> {s.stat || ''}</div>
-              <div>
-                {s.badge
+        const cs = app.comingSoon
+        const row = (
+          <div className="app-row" style={cs ? { opacity: 0.55, cursor: 'default', pointerEvents: 'none' } : undefined}>
+            <div className="app-icon"><Icon name={app.icon} size={18} /></div>
+            <div>
+              <div className="row-name">{app.name}</div>
+              <div className="row-desc">{app.desc}</div>
+            </div>
+            <div className="row-stat">{cs ? <span style={{ fontStyle: 'italic', color: 'var(--ink-4)' }}>—</span> : <><b>{s.statVal ?? '—'}</b> {s.stat || ''}</>}</div>
+            <div>
+              {cs
+                ? <span className="pill">Coming soon</span>
+                : s.badge
                   ? <span className={`pill ${s.badgeKind === 'alert' ? 'warn' : ''}`}><span className="dot" />{s.badge}</span>
                   : <span className="pill"><span className="dot" />Nominal</span>}
-              </div>
-              <div className="row-launch">Launch →</div>
             </div>
-          </Link>
+            <div className="row-launch">{cs ? '' : 'Launch →'}</div>
+          </div>
         )
+        return cs
+          ? <div key={app.id} style={{ textDecoration: 'none' }}>{row}</div>
+          : <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{row}</Link>
       })}
     </div>
   )
 }
-
-function AppCompactGrid() {
-  return (
-    <div className="app-compact-grid">
-      {APPS.map(app => (
-        <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
-          <div className="app-compact">
-            <div className="app-icon"><Icon name={app.icon} size={16} /></div>
-            <div className="name">{app.name}</div>
-            <div className="hint">Open →</div>
-          </div>
-        </Link>
-      ))}
-    </div>
-  )
-}
-
-type Layout = 'grid' | 'list' | 'compact'
 
 // ── Main dashboard ─────────────────────────────────────────────
 export default function DashboardPage() {
   const state = useCCState()
-  const [layout, setLayout] = useState<Layout>('grid')
+  const { settings } = useSettings()
+  const [summary, setSummary] = useState<HomeSummary | null>(null)
+
+  useEffect(() => {
+    const supabase = createClient()
+    async function loadSummary() {
+      const { data: org } = await supabase.from('organizations').select('id').limit(1).single()
+      if (!org) return
+      const oid = (org as Record<string, unknown>).id as string
+
+      const today = new Date().toISOString().slice(0, 10)
+      const currentYear = today.slice(0, 4)
+
+      const [{ data: invoiceRows }, { data: tenderRows }, { data: vehicleRows }] = await Promise.all([
+        supabase.from('invoices').select('amount, status, paid_date').eq('organization_id', oid),
+        supabase.from('tenders').select('stage, due_date, value').eq('organization_id', oid),
+        supabase.from('vehicles').select('status').eq('organization_id', oid).eq('active', true),
+      ])
+
+      const invoices = (invoiceRows ?? []) as Array<{ amount: number; status: string; paid_date: string | null }>
+      const tenders  = (tenderRows  ?? []) as Array<{ stage: string; due_date: string | null; value: number }>
+      const vehicles = (vehicleRows ?? []) as Array<{ status: string }>
+
+      const outstanding = invoices.filter(i => i.status !== 'paid' && i.status !== 'cancelled')
+      const outstandingAmount = outstanding.reduce((s, i) => s + i.amount, 0)
+
+      const paid = invoices.filter(i => i.status === 'paid' && i.paid_date)
+      const ytdRevenue = paid.filter(i => i.paid_date!.startsWith(currentYear)).reduce((s, i) => s + i.amount, 0)
+
+      const deadStages = new Set(['awarded', 'not selected', 'unsuccessful', 'declined'])
+      const liveTenders = tenders.filter(t => !deadStages.has(t.stage.toLowerCase()))
+      const livePipeline = liveTenders.reduce((s, t) => s + t.value, 0)
+      const nextTenderDeadline = liveTenders
+        .filter(t => t.due_date && t.due_date >= today)
+        .sort((a, b) => a.due_date!.localeCompare(b.due_date!))[0]?.due_date ?? null
+
+      const totalVehicles   = vehicles.length
+      const inServiceVehicles = vehicles.filter(v => v.status !== 'danger').length
+      const serviceDue      = vehicles.some(v => v.status === 'danger' || v.status === 'warn')
+
+      setSummary({
+        outstandingAmount,
+        outstandingCount: outstanding.length,
+        ytdRevenue,
+        liveTenders: liveTenders.length,
+        livePipeline,
+        nextTenderDeadline,
+        totalVehicles,
+        inServiceVehicles,
+        serviceDue,
+      })
+    }
+    loadSummary().catch(console.error)
+  }, [])
 
   const today = new Date().toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })
-  const directorName = 'Cameron Ellis'
-  const firstName = directorName.split(' ')[0]
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
-  const onShiftToday = (() => {
-    const todayKey = new Date().toISOString().slice(0, 10)
-    return state.roster[todayKey]?.length || 18
-  })()
+  const firstName = state.currentUserName?.split(' ')[0] ?? ''
+
+  const todayKey = new Date().toISOString().slice(0, 10)
+  const todayAssignments = state.roster[todayKey] ?? []
+  const onShiftToday = todayAssignments.length
+  const activeSites = new Set(todayAssignments.map(a => a.projectId)).size
+
+  const staffOnShift = Array.from(
+    todayAssignments.reduce((map, a) => {
+      if (!map.has(a.employeeId)) map.set(a.employeeId, a.projectId)
+      return map
+    }, new Map<string, string>())
+  ).map(([empId, projId]) => {
+    const emp = state.employees.find(e => e.id === empId)
+    const proj = state.projects.find(p => p.id === projId)
+    return emp ? { name: emp.name, initials: emp.name.split(' ').map(x => x[0]).join(''), role: emp.role, site: proj?.name ?? 'Unassigned' } : null
+  }).filter((x): x is NonNullable<typeof x> => x !== null)
+
+  const heroSub = onShiftToday === 0
+    ? 'No crew rostered today.'
+    : `${onShiftToday} staff across ${activeSites} site${activeSites !== 1 ? 's' : ''} today.`
 
   const stats: AppStats = {
-    roster: { statVal: onShiftToday, stat: 'on shift', badge: '3 open', badgeKind: 'alert' },
-    projects: { statVal: state.projects.length, stat: 'active', badge: '2 due wk' },
-    employees: { statVal: state.employees.length, stat: 'team', badge: null },
-    tender: { statVal: '7', stat: 'active', badge: 'Due Fri' },
-    staff: { statVal: '12', stat: 'reports', badge: '2 new' },
-    finance: { statVal: '$84.2k', stat: 'outstanding', badge: null },
-    fleet: { statVal: '14 / 16', stat: 'in service', badge: 'Service due', badgeKind: 'alert' },
+    roster:   { statVal: onShiftToday, stat: ' on shift', badge: null },
+    projects: { statVal: state.projects.length, stat: ' active', badge: null },
+    clients:  { statVal: state.clients.filter(c => c.status === 'active').length, stat: ' active', badge: null },
+    employees: { statVal: state.employees.length, stat: ' team', badge: null },
+    tender: {
+      statVal:  summary?.liveTenders ?? '—',
+      stat:     ' active',
+      badge:    summary ? nextDueLabel(summary.nextTenderDeadline) : null,
+    },
+    staff:   { statVal: '—', stat: ' reports', badge: null },
+    finance: {
+      statVal: summary ? fmt(summary.outstandingAmount) : '—',
+      stat:    ' outstanding',
+      badge:   null,
+    },
+    fleet: {
+      statVal:   summary ? `${summary.inServiceVehicles} / ${summary.totalVehicles}` : '—',
+      stat:      ' in service',
+      badge:     summary?.serviceDue ? 'Service due' : null,
+      badgeKind: 'alert',
+    },
   }
-
-  const LayoutComp = layout === 'list' ? <AppListRows stats={stats} /> : layout === 'compact' ? <AppCompactGrid /> : <AppGridCards stats={stats} />
-  const layoutLabel = layout === 'grid' ? 'Card grid' : layout === 'list' ? 'Operational list' : 'Compact launcher'
 
   return (
     <>
@@ -190,12 +353,12 @@ export default function DashboardPage() {
             <span>{today}</span>
           </div>
           <h1 className="hero-title">
-            Good morning, <em>{firstName}</em>.<br />Five crews in the field today.
+            {greeting}, <em>{firstName}</em>.<br />{heroSub}
           </h1>
           <div className="hero-meta">
-            <div><span className="label">On shift today</span><span className="val">{onShiftToday} staff across 5 sites</span></div>
-            <div><span className="label">Weather — Camden</span><span className="val">19° · light winds</span></div>
-            <div><span className="label">Active projects</span><span className="val">{state.projects.length} running · 2 completing this week</span></div>
+            <div><span className="label">On shift today</span><span className="val">{onShiftToday > 0 ? `${onShiftToday} staff across ${activeSites} site${activeSites !== 1 ? 's' : ''}` : 'No crew rostered'}</span></div>
+            <div><span className="label">Active projects</span><span className="val">{state.projects.length} running</span></div>
+            <div><span className="label">Outstanding invoices</span><span className="val">{summary ? fmt(summary.outstandingAmount) : '—'}</span></div>
           </div>
         </div>
       </div>
@@ -204,45 +367,55 @@ export default function DashboardPage() {
       <div className="content">
         {/* KPI row */}
         <div className="kpi-row">
-          <TenderPipelineWidget />
           <WeatherWidget />
           <div className="kpi">
-            <div className="kpi-label">Tender pipeline — Q2</div>
-            <div className="kpi-value">$1.4m</div>
-            <div className="kpi-delta">7 live · 3 awaiting</div>
-            <div className="kpi-spark"><Spark data={[0.8, 0.9, 1.0, 1.1, 1.2, 1.35, 1.4]} /></div>
+            <div className="kpi-label">Live tender pipeline</div>
+            <div className="kpi-value">{summary ? fmt(summary.livePipeline) : '—'}</div>
+            <div className="kpi-delta">{summary ? `${summary.liveTenders} active tender${summary.liveTenders !== 1 ? 's' : ''}` : ''}</div>
+            <div className="kpi-spark"><Spark data={[0, 0]} /></div>
+          </div>
+          <div className="kpi">
+            <div className="kpi-label">YTD revenue</div>
+            <div className="kpi-value">{summary ? fmt(summary.ytdRevenue) : '—'}</div>
+            <div className="kpi-delta">Paid invoices — {new Date().getFullYear()}</div>
+            <div className="kpi-spark"><Spark data={[0, 0]} /></div>
           </div>
           <div className="kpi">
             <div className="kpi-label">Outstanding invoices</div>
-            <div className="kpi-value">$84.2k</div>
-            <div className="kpi-delta down">6 invoices · 2 overdue</div>
-            <div className="kpi-spark"><Spark data={[92, 88, 90, 85, 88, 86, 84]} /></div>
+            <div className="kpi-value" style={{ color: summary && summary.outstandingAmount > 0 ? 'var(--warn)' : undefined }}>
+              {summary ? fmt(summary.outstandingAmount) : '—'}
+            </div>
+            <div className="kpi-delta">{summary ? `${summary.outstandingCount} invoice${summary.outstandingCount !== 1 ? 's' : ''} unpaid` : ''}</div>
+            <div className="kpi-spark"><Spark data={[0, 0]} /></div>
           </div>
         </div>
 
         {/* Applications section */}
         <div className="section-head">
           <div className="section-title">Applications</div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {(['grid', 'list', 'compact'] as Layout[]).map(l => (
-              <button
-                key={l}
-                onClick={() => setLayout(l)}
-                style={{
-                  padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
-                  background: layout === l ? 'var(--accent-soft)' : 'transparent',
-                  color: layout === l ? 'var(--accent)' : 'var(--ink-3)',
-                  border: '1px solid ' + (layout === l ? 'var(--accent)' : 'transparent'),
-                  fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.04em',
-                }}
-              >
-                {l === 'grid' ? 'Cards' : l === 'list' ? 'List' : 'Compact'}
-              </button>
-            ))}
-          </div>
         </div>
 
-        {LayoutComp}
+        {settings.dashboardLayout === 'list'
+          ? <AppListRows stats={stats} apps={APPS_OPERATIONS} />
+          : <AppGridCards stats={stats} apps={APPS_OPERATIONS} />}
+
+        {/* Business Management section */}
+        <div className="section-head" style={{ marginTop: 32 }}>
+          <div className="section-title">Organisation</div>
+        </div>
+
+        {settings.dashboardLayout === 'list'
+          ? <AppListRows stats={stats} apps={APPS_MANAGEMENT} />
+          : <AppGridCards stats={stats} apps={APPS_MANAGEMENT} />}
+
+        {/* Assets & Operations section */}
+        <div className="section-head" style={{ marginTop: 32 }}>
+          <div className="section-title">Assets &amp; Operations</div>
+        </div>
+
+        {settings.dashboardLayout === 'list'
+          ? <AppListRows stats={stats} apps={APPS_ASSETS} />
+          : <AppGridCards stats={stats} apps={APPS_ASSETS} />}
 
         {/* Bottom panels */}
         <div className="panel-grid">
@@ -253,15 +426,17 @@ export default function DashboardPage() {
               <Link href="/projects" className="section-action">All projects →</Link>
             </div>
             {state.projects.map(p => {
-              const pct = Math.min(100, Math.round((p.spent / p.budget) * 100))
+              const acts = state.activities.filter(a => a.projectId === p.id)
+              const doneCount = acts.filter(a => a.status === 'complete').length
+              const pct = acts.length > 0 ? Math.round((doneCount / acts.length) * 100) : 0
               return (
                 <div key={p.id} className="project-item">
                   <div className="project-top">
                     <div className="project-name">{p.name}</div>
-                    <div className="project-meta">${(p.spent / 1000).toFixed(1)}k / ${(p.budget / 1000).toFixed(1)}k</div>
+                    <div className="project-meta">${(p.contractValue / 1000).toFixed(1)}k</div>
                   </div>
                   <div className="progress-bar"><div className="progress-fill" style={{ width: pct + '%' }} /></div>
-                  <div className="progress-row"><span>{p.client}</span><span>{pct}% of budget</span></div>
+                  <div className="progress-row"><span>{p.client}</span><span>{doneCount}/{acts.length} activities done</span></div>
                 </div>
               )
             })}
@@ -273,16 +448,11 @@ export default function DashboardPage() {
               <div className="panel-title">Staff on shift — today</div>
               <Link href="/rostering" className="section-action">Full roster →</Link>
             </div>
-            {([
-              { name: 'Cameron Ellis', initials: 'CE', role: 'Lead Ecologist', site: 'Harrington Grove' },
-              { name: 'Priya Nair', initials: 'PN', role: 'Field Supervisor', site: 'Liverpool — Site B' },
-              { name: "James O'Brien", initials: 'JO', role: 'Bush Regenerator', site: 'Camden — Weed crew' },
-              { name: 'Marika Tawhai', initials: 'MT', role: 'Ecologist', site: 'Wollondilly — Survey' },
-              { name: 'Daniel Krauss', initials: 'DK', role: 'Fire / APZ Lead', site: 'AWP Reserve' },
-              { name: 'Lena Park', initials: 'LP', role: 'Native Seed Tech', site: 'Camden Nursery' },
-              { name: 'Tom Fitzgerald', initials: 'TF', role: 'Field Crew', site: 'Harrington Grove' },
-              { name: 'Amelia Chen', initials: 'AC', role: 'Field Crew', site: 'Liverpool — Site B' },
-            ] as const).map((s, i) => (
+            {staffOnShift.length === 0 ? (
+              <div style={{ padding: '20px 0', color: 'var(--ink-3)', fontSize: 13, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                No crew rostered for today
+              </div>
+            ) : staffOnShift.map((s, i) => (
               <div key={i} className="staff-row">
                 <div className="staff-avatar">{s.initials}</div>
                 <div className="staff-info">

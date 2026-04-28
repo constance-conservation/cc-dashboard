@@ -1,4 +1,5 @@
 'use client'
+
 import { useState } from 'react'
 
 type Props = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'> & {
@@ -8,7 +9,6 @@ type Props = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChan
 
 export function NumericInput({ value, onChange, ...rest }: Props) {
   const [str, setStr] = useState(value === 0 ? '' : String(value))
-
   return (
     <input
       {...rest}

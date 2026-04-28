@@ -14,10 +14,10 @@
   --line: oklch(0.18 0.015 150 / 0.1);
   --line-strong: oklch(0.18 0.015 150 / 0.18);
 
-  --accent: oklch(0.42 0.07 150);
-  --accent-2: oklch(0.52 0.08 150);
-  --accent-soft: oklch(0.42 0.07 150 / 0.08);
-  --accent-ink: oklch(0.98 0.01 150);
+  --accent: oklch(0.42 0.08 230);
+  --accent-2: oklch(0.52 0.09 230);
+  --accent-soft: oklch(0.42 0.08 230 / 0.08);
+  --accent-ink: oklch(0.98 0.01 230);
 
   --warn: oklch(0.62 0.12 55);
   --danger: oklch(0.55 0.18 25);
@@ -31,21 +31,6 @@
   --shadow-md: 0 4px 20px oklch(0.18 0.015 150 / 0.06), 0 0 0 1px var(--line);
 }
 
-[data-theme="clay"] {
-  --accent: oklch(0.48 0.1 50);
-  --accent-2: oklch(0.58 0.11 50);
-  --accent-soft: oklch(0.48 0.1 50 / 0.08);
-}
-[data-theme="ocean"] {
-  --accent: oklch(0.42 0.08 230);
-  --accent-2: oklch(0.52 0.09 230);
-  --accent-soft: oklch(0.42 0.08 230 / 0.08);
-}
-[data-theme="ink"] {
-  --accent: oklch(0.22 0.01 150);
-  --accent-2: oklch(0.32 0.01 150);
-  --accent-soft: oklch(0.22 0.01 150 / 0.08);
-}
 
 [data-mode="dark"] {
   --bg: oklch(0.16 0.012 150);
@@ -57,28 +42,12 @@
   --ink-4: oklch(0.42 0.008 90);
   --line: oklch(0.98 0.005 90 / 0.08);
   --line-strong: oklch(0.98 0.005 90 / 0.14);
-  --accent: oklch(0.7 0.09 150);
-  --accent-2: oklch(0.8 0.1 150);
-  --accent-soft: oklch(0.7 0.09 150 / 0.12);
-  --accent-ink: oklch(0.14 0.01 150);
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2), 0 0 0 1px var(--line);
-  --shadow-md: 0 4px 20px rgba(0,0,0,0.3), 0 0 0 1px var(--line);
-}
-[data-mode="dark"][data-theme="clay"] {
-  --accent: oklch(0.72 0.11 50);
-  --accent-2: oklch(0.82 0.12 50);
-  --accent-soft: oklch(0.72 0.11 50 / 0.12);
-}
-[data-mode="dark"][data-theme="ocean"] {
   --accent: oklch(0.7 0.1 230);
   --accent-2: oklch(0.8 0.11 230);
   --accent-soft: oklch(0.7 0.1 230 / 0.12);
-}
-[data-mode="dark"][data-theme="ink"] {
-  --accent: oklch(0.9 0.005 150);
-  --accent-2: oklch(0.98 0.005 150);
-  --accent-soft: oklch(0.9 0.005 150 / 0.1);
-  --accent-ink: oklch(0.14 0.01 150);
+  --accent-ink: oklch(0.14 0.01 230);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2), 0 0 0 1px var(--line);
+  --shadow-md: 0 4px 20px rgba(0,0,0,0.3), 0 0 0 1px var(--line);
 }
 
 /* ── Base ──────────────────────────────────────────────────── */
@@ -387,6 +356,9 @@ input, select, textarea { font-family: inherit; font-size: inherit; color: inher
 .cal-cell:last-child { border-right: none; }
 .cal-cell:hover { background: var(--bg-sunken); }
 .cal-cell-empty { background: repeating-linear-gradient(45deg, var(--bg-sunken) 0 6px, transparent 6px 12px); cursor: default; }
+.cal-cell-past { opacity: 0.65; }
+.cal-cell-past .cal-date { color: var(--ink-4); }
+.cal-lock { font-size: 9px; margin-left: 4px; opacity: 0.5; }
 .cal-date { font-family: var(--font-mono), monospace; font-size: 12px; color: var(--ink-3); margin-bottom: 2px; }
 .cal-empty-label { font-family: var(--font-mono), monospace; font-size: 10px; color: var(--ink-4); text-align: center; padding-top: 12px; opacity: 0.6; }
 .cal-shift { background: var(--bg-sunken); border-left: 2px solid var(--accent); border-radius: 4px; padding: 5px 7px; font-size: 11px; }

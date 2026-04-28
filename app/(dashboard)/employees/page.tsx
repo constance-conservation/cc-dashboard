@@ -5,8 +5,17 @@ import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer, Field } from '@/components/dashboard/Drawer'
+import { Select } from '@/components/dashboard/Select'
+import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import { NumericInput } from '@/components/dashboard/NumericInput'
 import type { Employee } from '@/lib/types'
+
+const EMPLOYMENT_TYPES = [
+  { value: 'full-time', label: 'Full-time' },
+  { value: 'part-time', label: 'Part-time' },
+  { value: 'casual', label: 'Casual' },
+  { value: 'contractor', label: 'Contractor' },
+]
 
 function SkillsEditor({ selected, allSkills, onChange, onAddSkill }: { selected: string[]; allSkills: string[]; onChange: (s: string[]) => void; onAddSkill: (s: string) => void }) {
   const [newSkill, setNewSkill] = useState('')
@@ -71,19 +80,36 @@ function ListManagerModal({ title, items, onAdd, onRemove, onRename, onClose, no
   )
 }
 
-function EmployeeCard({ emp, onOpen }: { emp: Employee; onOpen: () => void }) {
+function EmployeeCard({ emp, onOpen, onUnarchive }: {
+  emp: Employee
+  onOpen?: () => void
+  onUnarchive?: () => void
+}) {
   const days = ['M', 'T', 'W', 'T', 'F', 'S']
   const keys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
   const availCount = keys.filter(k => emp.availability[k]).length
+  const isArchived = !!onUnarchive
   return (
-    <div className="app-card" onClick={onOpen} style={{ minHeight: 0, gap: 14 }}>
+    <div className="app-card" onClick={onOpen} style={{ minHeight: 0, gap: 14, cursor: onOpen ? 'pointer' : 'default', opacity: isArchived ? 0.75 : 1 }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
         <div className="staff-avatar" style={{ width: 44, height: 44, fontSize: 14 }}>{emp.name.split(' ').map(x => x[0]).join('')}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 16, fontWeight: 500, letterSpacing: '-0.01em' }}>{emp.name}</div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-3)', marginTop: 2 }}>{emp.role} · {emp.type}</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-3)', marginTop: 2 }}>{emp.type}</div>
         </div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-3)' }}>${emp.payRate}/hr</div>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-3)' }}>${emp.payRate}/hr</div>
+          {onUnarchive && (
+            <button
+              className="btn"
+              title="Restore employee"
+              onClick={e => { e.stopPropagation(); onUnarchive() }}
+              style={{ fontSize: 11, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
+            >
+              <Icon name="unarchive" size={12} /> Restore
+            </button>
+          )}
+        </div>
       </div>
       <div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-4)', marginBottom: 6 }}>Availability</div>
@@ -92,7 +118,7 @@ function EmployeeCard({ emp, onOpen }: { emp: Employee; onOpen: () => void }) {
             <div key={i} style={{ flex: 1, height: 26, borderRadius: 4, display: 'grid', placeItems: 'center', fontSize: 11, fontFamily: 'var(--font-mono)', background: emp.availability[keys[i]] ? 'var(--accent-soft)' : 'var(--bg-sunken)', color: emp.availability[keys[i]] ? 'var(--accent)' : 'var(--ink-4)', border: '1px solid ' + (emp.availability[keys[i]] ? 'transparent' : 'var(--line)') }}>{d}</div>
           ))}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 6 }}>{availCount} days/week available</div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 6 }}>{isArchived ? 'Archived — not available for rostering' : `${availCount} days/week available`}</div>
       </div>
       <div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-4)', marginBottom: 6 }}>Skills ({emp.skills.length})</div>
@@ -106,29 +132,60 @@ function EmployeeCard({ emp, onOpen }: { emp: Employee; onOpen: () => void }) {
 }
 
 function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; state: ReturnType<typeof useCCState>; onClose: () => void }) {
-  const emp = state.employees.find(e => e.id === employeeId)!
+  const emp = state.employees.find(e => e.id === employeeId) ?? state.archivedEmployees.find(e => e.id === employeeId)
+  if (!emp) return null
+  const isArchived = !state.employees.find(e => e.id === employeeId)
   const [edit, setEdit] = useState<Employee>(emp)
+  const [confirm, setConfirm] = useState<'delete' | 'archive' | null>(null)
   const save = () => { state.updateEmployee(emp.id, edit); onClose() }
-  const del = () => { if (confirm(`Remove ${emp.name}?`)) { state.deleteEmployee(emp.id); onClose() } }
+  const del = () => setConfirm('delete')
+  const archive = () => setConfirm('archive')
+  const restore = () => { state.unarchiveEmployee(emp.id); onClose() }
+  const handleConfirm = () => {
+    if (confirm === 'delete') { state.deleteEmployee(emp.id); onClose() }
+    if (confirm === 'archive') { state.archiveEmployee(emp.id); onClose() }
+    setConfirm(null)
+  }
   const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
   return (
-    <Drawer title={emp.name} subtitle={emp.role} onClose={onClose} onSave={save} onDelete={del}>
+    <>
+    {confirm === 'delete' && (
+      <ConfirmDialog
+        title={`Delete ${emp.name}?`}
+        message="This is permanent and cannot be undone. All roster history referencing this employee will be retained, but the employee will no longer appear anywhere in the system."
+        confirmLabel="Delete permanently"
+        danger
+        onConfirm={handleConfirm}
+        onCancel={() => setConfirm(null)}
+      />
+    )}
+    {confirm === 'archive' && (
+      <ConfirmDialog
+        title={`Archive ${emp.name}?`}
+        message="They will be cleared from availability and removed from future rostering. You can restore them at any time from the Archived section."
+        confirmLabel="Archive"
+        onConfirm={handleConfirm}
+        onCancel={() => setConfirm(null)}
+      />
+    )}
+    <Drawer
+      title={emp.name}
+      subtitle={isArchived ? 'Archived employee' : undefined}
+      onClose={onClose}
+      onSave={save}
+      onDelete={del}
+      onArchive={isArchived ? undefined : archive}
+      onRestore={isArchived ? restore : undefined}
+    >
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Name"><input className="input" value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></Field>
         <Field label="Role">
-          <select className="select" value={edit.role} onChange={e => setEdit({ ...edit, role: e.target.value })}>
-            {state.roles.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
+          <Select value={edit.role} onChange={v => setEdit({ ...edit, role: v })} options={state.roles.map(r => ({ value: r, label: r }))} />
         </Field>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Employment type">
-          <select className="select" value={edit.type} onChange={e => setEdit({ ...edit, type: e.target.value as Employee['type'] })}>
-            <option value="full-time">Full-time</option>
-            <option value="part-time">Part-time</option>
-            <option value="casual">Casual</option>
-            <option value="contractor">Contractor</option>
-          </select>
+          <Select value={edit.type} onChange={v => setEdit({ ...edit, type: v as Employee['type'] })} options={EMPLOYMENT_TYPES} />
         </Field>
         <Field label="Pay rate (AUD/hr)"><NumericInput className="input" value={edit.payRate} onChange={v => setEdit({ ...edit, payRate: v })} /></Field>
       </div>
@@ -151,31 +208,44 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
         <SkillsEditor selected={edit.skills} allSkills={state.skills} onChange={skills => setEdit({ ...edit, skills })} onAddSkill={state.addSkill} />
       </Field>
     </Drawer>
+    </>
   )
 }
 
 function AddEmployeeModal({ state, onClose }: { state: ReturnType<typeof useCCState>; onClose: () => void }) {
   const [e, setE] = useState<Omit<Employee, 'id'>>({ name: '', role: state.roles[0] || 'Field Crew', type: 'full-time', payRate: 40, email: '', phone: '', availability: { mon: true, tue: true, wed: true, thu: true, fri: true, sat: false }, skills: [] })
   const save = () => { if (!e.name.trim()) return; state.addEmployee(e); onClose() }
+  const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
   return (
     <Drawer title="New employee" subtitle="Add to team roster" onClose={onClose} onSave={save} saveLabel="Create">
       <Field label="Name"><input className="input" value={e.name} onChange={ev => setE({ ...e, name: ev.target.value })} autoFocus /></Field>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Field label="Role">
-          <select className="select" value={e.role} onChange={ev => setE({ ...e, role: ev.target.value })}>
-            {state.roles.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
+          <Select value={e.role} onChange={v => setE({ ...e, role: v })} options={state.roles.map(r => ({ value: r, label: r }))} />
         </Field>
         <Field label="Type">
-          <select className="select" value={e.type} onChange={ev => setE({ ...e, type: ev.target.value as Employee['type'] })}>
-            <option value="full-time">Full-time</option>
-            <option value="part-time">Part-time</option>
-            <option value="casual">Casual</option>
-            <option value="contractor">Contractor</option>
-          </select>
+          <Select value={e.type} onChange={v => setE({ ...e, type: v as Employee['type'] })} options={EMPLOYMENT_TYPES} />
         </Field>
       </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <Field label="Email"><input className="input" type="email" placeholder="email@example.com" value={e.email} onChange={ev => setE({ ...e, email: ev.target.value })} /></Field>
+        <Field label="Phone"><input className="input" type="tel" placeholder="04xx xxx xxx" value={e.phone} onChange={ev => setE({ ...e, phone: ev.target.value })} /></Field>
+      </div>
       <Field label="Pay rate (AUD/hr)"><NumericInput className="input" value={e.payRate} onChange={v => setE({ ...e, payRate: v })} /></Field>
+      <Field label="Weekly availability">
+        <div style={{ display: 'flex', gap: 4 }}>
+          {days.map(d => (
+            <label key={d} style={{ flex: 1, height: 40, display: 'grid', placeItems: 'center', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', background: e.availability[d] ? 'var(--accent-soft)' : 'var(--bg-sunken)', color: e.availability[d] ? 'var(--accent)' : 'var(--ink-3)', border: '1px solid ' + (e.availability[d] ? 'var(--accent)' : 'var(--line)'), borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
+              <input type="checkbox" checked={e.availability[d]} onChange={ev => setE({ ...e, availability: { ...e.availability, [d]: ev.target.checked } })} style={{ display: 'none' }} />
+              {d}
+            </label>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 6 }}>Saturday only appears in the roster if at least one employee has it ticked.</div>
+      </Field>
+      <Field label={`Skills (${e.skills.length})`}>
+        <SkillsEditor selected={e.skills} allSkills={state.skills} onChange={skills => setE({ ...e, skills })} onAddSkill={state.addSkill} />
+      </Field>
     </Drawer>
   )
 }
@@ -187,8 +257,12 @@ export default function EmployeesPage() {
   const [showSkills, setShowSkills] = useState(false)
   const [showRoles, setShowRoles] = useState(false)
   const [filter, setFilter] = useState('')
+  const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active')
 
   const visible = state.employees.filter(e =>
+    !filter || e.name.toLowerCase().includes(filter.toLowerCase()) || e.role.toLowerCase().includes(filter.toLowerCase())
+  )
+  const visibleArchived = state.archivedEmployees.filter(e =>
     !filter || e.name.toLowerCase().includes(filter.toLowerCase()) || e.role.toLowerCase().includes(filter.toLowerCase())
   )
 
@@ -197,23 +271,50 @@ export default function EmployeesPage() {
       <div className="subpage-top">
         <Link href="/" className="back-btn"><Icon name="back" size={16} /> Dashboard</Link>
         <div style={{ width: 1, height: 20, background: 'var(--line)' }} />
-        <span className="sp-crumb">{state.employees.length} team members · {state.skills.length} skills tracked</span>
+        <span className="sp-crumb">{activeTab === 'active' ? `${state.employees.length} active · ${state.skills.length} skills tracked` : `${state.archivedEmployees.length} archived`}</span>
         <div style={{ flex: 1 }} />
         <h2 className="sp-title">Employees</h2>
       </div>
 
       <div className="subpage-body">
         <div style={{ display: 'flex', gap: 10, marginBottom: 18, alignItems: 'center' }}>
-          <button className="btn primary" onClick={() => setShowAdd(true)}><Icon name="plus" size={14} /> New employee</button>
+          {activeTab === 'active' && <button className="btn primary" onClick={() => setShowAdd(true)}><Icon name="plus" size={14} /> New employee</button>}
           <button className="btn" onClick={() => setShowSkills(true)}>Manage skills ({state.skills.length})</button>
           <button className="btn" onClick={() => setShowRoles(true)}>Manage roles ({state.roles.length})</button>
+          <button style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' as const, letterSpacing: '0.05em', background: activeTab === 'active' ? 'var(--accent-soft)' : 'transparent', color: activeTab === 'active' ? 'var(--accent)' : 'var(--ink-3)', border: '1px solid ' + (activeTab === 'active' ? 'var(--accent)' : 'transparent') }} onClick={() => setActiveTab('active')}>Active</button>
+          <button style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' as const, letterSpacing: '0.05em', background: activeTab === 'archived' ? 'var(--accent-soft)' : 'transparent', color: activeTab === 'archived' ? 'var(--accent)' : 'var(--ink-3)', border: '1px solid ' + (activeTab === 'archived' ? 'var(--accent)' : 'transparent') }} onClick={() => setActiveTab('archived')}>Archived</button>
           <div style={{ flex: 1 }} />
           <input className="input" placeholder="Search name or role…" value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 260 }} />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-          {visible.map(emp => <EmployeeCard key={emp.id} emp={emp} onOpen={() => setSelected(emp.id)} />)}
-        </div>
+        {activeTab === 'active' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
+            {visible.map(emp => (
+              <EmployeeCard key={emp.id} emp={emp} onOpen={() => setSelected(emp.id)} />
+            ))}
+            {visible.length === 0 && (
+              <div style={{ color: 'var(--ink-3)', fontSize: 12, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                No employees match
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
+            {visibleArchived.map(emp => (
+              <EmployeeCard
+                key={emp.id}
+                emp={emp}
+                onOpen={() => setSelected(emp.id)}
+                onUnarchive={() => state.unarchiveEmployee(emp.id)}
+              />
+            ))}
+            {visibleArchived.length === 0 && (
+              <div style={{ color: 'var(--ink-3)', fontSize: 12, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                No archived employees
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {selected && <EmployeeDrawer employeeId={selected} state={state} onClose={() => setSelected(null)} />}
