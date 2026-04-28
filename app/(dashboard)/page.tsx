@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
+import { useSettings } from '@/lib/store/SettingsContext'
 import { Icon } from '@/components/icons/Icon'
 import { createClient } from '@/lib/supabase/client'
 
@@ -233,32 +234,10 @@ function AppListRows({ stats, apps }: { stats: AppStats; apps: AppEntry[] }) {
   )
 }
 
-function AppCompactGrid({ apps }: { apps: AppEntry[] }) {
-  return (
-    <div className="app-compact-grid">
-      {apps.map(app => {
-        const cs = app.comingSoon
-        const tile = (
-          <div className="app-compact" style={cs ? { opacity: 0.55, cursor: 'default', pointerEvents: 'none' } : undefined}>
-            <div className="app-icon"><Icon name={app.icon} size={16} /></div>
-            <div className="name">{app.name}</div>
-            <div className="hint">{cs ? 'Coming soon' : 'Open →'}</div>
-          </div>
-        )
-        return cs
-          ? <div key={app.id} style={{ textDecoration: 'none' }}>{tile}</div>
-          : <Link key={app.id} href={app.href} style={{ textDecoration: 'none' }} {...(app.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{tile}</Link>
-      })}
-    </div>
-  )
-}
-
-type Layout = 'grid' | 'list' | 'compact'
-
 // ── Main dashboard ─────────────────────────────────────────────
 export default function DashboardPage() {
   const state = useCCState()
-  const [layout, setLayout] = useState<Layout>('grid')
+  const { settings } = useSettings()
   const [summary, setSummary] = useState<HomeSummary | null>(null)
 
   useEffect(() => {
@@ -388,13 +367,13 @@ export default function DashboardPage() {
       <div className="content">
         {/* KPI row */}
         <div className="kpi-row">
+          <WeatherWidget />
           <div className="kpi">
             <div className="kpi-label">Live tender pipeline</div>
             <div className="kpi-value">{summary ? fmt(summary.livePipeline) : '—'}</div>
             <div className="kpi-delta">{summary ? `${summary.liveTenders} active tender${summary.liveTenders !== 1 ? 's' : ''}` : ''}</div>
             <div className="kpi-spark"><Spark data={[0, 0]} /></div>
           </div>
-          <WeatherWidget />
           <div className="kpi">
             <div className="kpi-label">YTD revenue</div>
             <div className="kpi-value">{summary ? fmt(summary.ytdRevenue) : '—'}</div>
@@ -414,29 +393,10 @@ export default function DashboardPage() {
         {/* Applications section */}
         <div className="section-head">
           <div className="section-title">Applications</div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {(['grid', 'list', 'compact'] as Layout[]).map(l => (
-              <button
-                key={l}
-                onClick={() => setLayout(l)}
-                style={{
-                  padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
-                  background: layout === l ? 'var(--accent-soft)' : 'transparent',
-                  color: layout === l ? 'var(--accent)' : 'var(--ink-3)',
-                  border: '1px solid ' + (layout === l ? 'var(--accent)' : 'transparent'),
-                  fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.04em',
-                }}
-              >
-                {l === 'grid' ? 'Cards' : l === 'list' ? 'List' : 'Compact'}
-              </button>
-            ))}
-          </div>
         </div>
 
-        {layout === 'list'
+        {settings.dashboardLayout === 'list'
           ? <AppListRows stats={stats} apps={APPS_OPERATIONS} />
-          : layout === 'compact'
-          ? <AppCompactGrid apps={APPS_OPERATIONS} />
           : <AppGridCards stats={stats} apps={APPS_OPERATIONS} />}
 
         {/* Business Management section */}
@@ -444,10 +404,8 @@ export default function DashboardPage() {
           <div className="section-title">Organisation</div>
         </div>
 
-        {layout === 'list'
+        {settings.dashboardLayout === 'list'
           ? <AppListRows stats={stats} apps={APPS_MANAGEMENT} />
-          : layout === 'compact'
-          ? <AppCompactGrid apps={APPS_MANAGEMENT} />
           : <AppGridCards stats={stats} apps={APPS_MANAGEMENT} />}
 
         {/* Assets & Operations section */}
@@ -455,10 +413,8 @@ export default function DashboardPage() {
           <div className="section-title">Assets &amp; Operations</div>
         </div>
 
-        {layout === 'list'
+        {settings.dashboardLayout === 'list'
           ? <AppListRows stats={stats} apps={APPS_ASSETS} />
-          : layout === 'compact'
-          ? <AppCompactGrid apps={APPS_ASSETS} />
           : <AppGridCards stats={stats} apps={APPS_ASSETS} />}
 
         {/* Bottom panels */}

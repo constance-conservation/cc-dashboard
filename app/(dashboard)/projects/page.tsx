@@ -822,9 +822,6 @@ function ActivityTypesModal({ state, onClose }: {
               <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 24, margin: 0, letterSpacing: '-0.015em' }}>
                 Activity Types
               </h3>
-              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 3 }}>
-                Org-wide library of work categories
-              </div>
             </div>
             <button className="iconbtn" onClick={onClose}><Icon name="close" size={16} /></button>
           </div>
@@ -950,7 +947,7 @@ export default function ProjectsPage() {
             <Icon name="plus" size={14} /> New project
           </button>
           <button className="btn" onClick={() => setShowActivityTypes(true)}>
-            Activity Types
+            Activities
           </button>
           <button style={tabStyle('active')} onClick={() => setActiveTab('active')}>Active</button>
           <button style={tabStyle('archived')} onClick={() => setActiveTab('archived')}>Archived</button>

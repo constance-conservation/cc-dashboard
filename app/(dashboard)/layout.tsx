@@ -3,6 +3,7 @@
 import { StateProvider } from '@/lib/store/CCStateContext'
 import { TopBar } from '@/components/dashboard/TopBar'
 import { useCCState } from '@/lib/store/CCStateContext'
+import { SettingsProvider } from '@/lib/store/SettingsContext'
 
 function LoadingGate({ children }: { children: React.ReactNode }) {
   const { loading } = useCCState()
@@ -18,11 +19,13 @@ function LoadingGate({ children }: { children: React.ReactNode }) {
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <StateProvider>
-      <div className="app">
-        <TopBar />
-        <LoadingGate>{children}</LoadingGate>
-      </div>
-    </StateProvider>
+    <SettingsProvider>
+      <StateProvider>
+        <div className="app">
+          <TopBar />
+          <LoadingGate>{children}</LoadingGate>
+        </div>
+      </StateProvider>
+    </SettingsProvider>
   )
 }
