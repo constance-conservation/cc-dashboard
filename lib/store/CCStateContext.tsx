@@ -38,6 +38,7 @@ function rowToProject(r: Record<string, unknown>): Project {
     priority: ((r.priority as string) ?? 'medium') as Priority,
     contractValue: (r.contract_value as number) ?? 0,
     projectNumber: (r.project_number as string) || undefined,
+    archived: (r.archived as boolean) ?? false,
   }
 }
 
@@ -129,6 +130,7 @@ function contractPatch(p: Partial<Project>): Record<string, unknown> {
   if (p.priority !== undefined)      row.priority            = p.priority
   if (p.contractValue !== undefined) row.contract_value      = p.contractValue
   if (p.projectNumber !== undefined) row.project_number      = p.projectNumber
+  if (p.archived !== undefined)      row.archived            = p.archived
   return row
 }
 
@@ -173,11 +175,14 @@ type CCActions = {
   updateProject:    (id: string, patch: Partial<Project>) => void
   addProject:       (p: Omit<Project, 'id'>) => Promise<string | null>
   deleteProject:    (id: string) => void
+  archiveProject:   (id: string) => void
+  restoreProject:   (id: string) => void
   // Sites
   createAndLinkSite: (projectId: string, name: string, notes?: string) => void
   linkSite:          (projectId: string, siteId: string) => void
   unlinkSite:        (projectId: string, siteId: string) => void
   updateSite:        (id: string, patch: Partial<Site>) => void
+  deleteSite:        (siteId: string) => void
   // Activities
   addActivity:      (a: Omit<Activity, 'id'>) => void
   updateActivity:   (id: string, patch: Partial<Activity>) => void
@@ -479,6 +484,28 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .then(({ error }) => { if (error) console.error('deleteProject:', error) })
     }
 
+    function archiveProject(id: string) {
+      setState(prev => ({
+        ...prev,
+        projects: prev.projects.map(p => p.id === id ? { ...p, archived: true } : p),
+      }))
+      db.from('client_contracts')
+        .update({ archived: true })
+        .eq('id', id)
+        .then(({ error }) => { if (error) console.error('archiveProject:', error) })
+    }
+
+    function restoreProject(id: string) {
+      setState(prev => ({
+        ...prev,
+        projects: prev.projects.map(p => p.id === id ? { ...p, archived: false } : p),
+      }))
+      db.from('client_contracts')
+        .update({ archived: false })
+        .eq('id', id)
+        .then(({ error }) => { if (error) console.error('restoreProject:', error) })
+    }
+
     // ── Sites ──────────────────────────────────────────────────
 
     async function createAndLinkSite(projectId: string, name: string, notes?: string) {
@@ -559,6 +586,18 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .update(sitePatch(patch))
         .eq('id', id)
         .then(({ error }) => { if (error) console.error('updateSite:', error) })
+    }
+
+    function deleteSite(siteId: string) {
+      setState(prev => ({
+        ...prev,
+        sites: prev.sites.filter(s => s.id !== siteId),
+        projectSiteLinks: prev.projectSiteLinks.filter(l => l.siteId !== siteId),
+      }))
+      db.from('sites')
+        .delete()
+        .eq('id', siteId)
+        .then(({ error }) => { if (error) console.error('deleteSite:', error) })
     }
 
     // ── Activities ─────────────────────────────────────────────
@@ -1014,10 +1053,13 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       updateProject,
       addProject,
       deleteProject,
+      archiveProject,
+      restoreProject,
       createAndLinkSite,
       linkSite,
       unlinkSite,
       updateSite,
+      deleteSite,
       addActivity,
       updateActivity,
       deleteActivity,

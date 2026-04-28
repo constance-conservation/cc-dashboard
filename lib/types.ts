@@ -39,6 +39,7 @@ export type Project = {
   priority: Priority
   contractValue: number
   projectNumber?: string
+  archived?: boolean
 }
 
 // Physical location in the organisation's location library.

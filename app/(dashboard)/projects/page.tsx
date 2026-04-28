@@ -403,7 +403,7 @@ function ProjectDrawer({ projectId, state, onClose }: {
       {confirmDeleteProject && (
         <ConfirmDialog
           title={`Delete "${p.name}"?`}
-          message="This will permanently delete the project, all its sites, activities, and roster assignments."
+          message="This will permanently delete the project, all its sites, activities, and roster assignments. Permanent deletion is available from both Active and Archived views."
           confirmLabel="Delete project"
           danger
           onConfirm={() => { state.deleteProject(p.id); onClose() }}
@@ -436,6 +436,8 @@ function ProjectDrawer({ projectId, state, onClose }: {
         onClose={onClose}
         onSave={tab === 'details' ? saveDetails : undefined}
         onDelete={tab === 'details' ? () => setConfirmDeleteProject(true) : undefined}
+        onArchive={tab === 'details' && !p.archived ? () => { state.archiveProject(p.id); onClose() } : undefined}
+        onRestore={tab === 'details' && p.archived ? () => { state.restoreProject(p.id); onClose() } : undefined}
       >
         {/* Tab bar */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 18 }}>
@@ -600,62 +602,6 @@ function ProjectDrawer({ projectId, state, onClose }: {
   )
 }
 
-// ── ProjectCard ────────────────────────────────────────────────────────────────
-
-function ProjectCard({ project, state, onOpen }: {
-  project: Project
-  state: ReturnType<typeof useCCState>
-  onOpen: () => void
-}) {
-  const p = project
-  const activities = state.activities.filter(a => a.projectId === p.id)
-  const sites = projectSites(state, p.id)
-  const activeCount = activities.filter(a => a.status === 'active').length
-
-  return (
-    <div className="app-card" onClick={onOpen} style={{ minHeight: 0 }}>
-      <div className="app-card-top">
-        <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 4 }}>
-            {p.client}
-            {p.projectNumber && <span style={{ marginLeft: 8, opacity: 0.7 }}>{p.projectNumber}</span>}
-          </div>
-          <h3 className="app-name" style={{ fontSize: 22, marginBottom: 2 }}>{p.name}</h3>
-        </div>
-        <span className={`pill ${p.priority === 'high' ? 'accent' : ''}`}>
-          <span className="dot" />{p.priority}
-        </span>
-      </div>
-      <div style={{ display: 'flex', gap: 20, marginBottom: 8 }}>
-        <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 2 }}>Contract</div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, letterSpacing: '-0.01em' }}>
-            ${(p.contractValue / 1000).toFixed(1)}k
-          </div>
-        </div>
-        <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 2 }}>Activities</div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, letterSpacing: '-0.01em' }}>
-            {activeCount}
-            {activities.length > activeCount && (
-              <span style={{ fontSize: 12, color: 'var(--ink-3)', marginLeft: 4 }}>/ {activities.length}</span>
-            )}
-          </div>
-        </div>
-        {sites.length > 0 && (
-          <div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 2 }}>Sites</div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, letterSpacing: '-0.01em' }}>{sites.length}</div>
-          </div>
-        )}
-      </div>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-        {p.start || '—'} → {p.end || '—'}
-      </div>
-    </div>
-  )
-}
-
 // ── AddProjectModal ────────────────────────────────────────────────────────────
 
 function AddProjectModal({ state, onClose }: {
@@ -664,7 +610,7 @@ function AddProjectModal({ state, onClose }: {
 }) {
   const [p, setP] = useState<Omit<Project, 'id'>>({
     name: '', client: '', start: '', end: '',
-    priority: 'medium', contractValue: 0,
+    priority: 'medium', contractValue: 0, projectNumber: undefined,
   })
   const [existingClients, setExistingClients] = useState<string[]>([])
   const [newClient, setNewClient] = useState(false)
@@ -715,9 +661,14 @@ function AddProjectModal({ state, onClose }: {
   return (
     <Drawer title="New project" subtitle="Add to projects list" onClose={onClose} onSave={save}
       saveLabel={saving ? 'Creating…' : 'Create'} saveDisabled={saving}>
+      <Field label="Project number (optional)">
+        <input className="input" value={p.projectNumber ?? ''} placeholder="e.g. CC-2026-04"
+          onChange={e => setP({ ...p, projectNumber: e.target.value || undefined })} autoFocus />
+      </Field>
+
       <Field label="Project name">
         <input className="input" value={p.name}
-          onChange={e => setP({ ...p, name: e.target.value })} autoFocus />
+          onChange={e => setP({ ...p, name: e.target.value })} />
       </Field>
 
       <Field label="Client">
@@ -804,11 +755,6 @@ function AddProjectModal({ state, onClose }: {
         </Field>
       </div>
 
-      <Field label="Project number (optional)">
-        <input className="input" value={p.projectNumber ?? ''} placeholder="e.g. CC-2026-04"
-          onChange={e => setP({ ...p, projectNumber: e.target.value || undefined })} />
-      </Field>
-
       {saveError && (
         <div style={{
           padding: '10px 14px', borderRadius: 8, fontSize: 12,
@@ -822,20 +768,143 @@ function AddProjectModal({ state, onClose }: {
   )
 }
 
+// ── ManageActivitiesModal ──────────────────────────────────────────────────────
+
+function ManageActivitiesModal({ state, onClose }: {
+  state: ReturnType<typeof useCCState>
+  onClose: () => void
+}) {
+  const [editActivityId, setEditActivityId] = useState<string | null>(null)
+  const [editProjectId, setEditProjectId] = useState<string | null>(null)
+  const [filterStatus, setFilterStatus] = useState<'all' | ActivityStatus>('all')
+
+  const filtered = state.activities.filter(a =>
+    filterStatus === 'all' || a.status === filterStatus
+  )
+
+  const byProject = state.projects.map(p => ({
+    project: p,
+    activities: filtered.filter(a => a.projectId === p.id),
+  })).filter(g => g.activities.length > 0)
+
+  return (
+    <>
+      {editActivityId !== null && editProjectId !== null && (
+        <ActivityDrawer
+          projectId={editProjectId}
+          activityId={editActivityId}
+          state={state}
+          onClose={() => { setEditActivityId(null); setEditProjectId(null) }}
+        />
+      )}
+      <div className="drawer-backdrop" onClick={onClose}>
+        <div className="drawer" style={{ width: 720, maxWidth: '95vw' }} onClick={e => e.stopPropagation()}>
+          <div className="drawer-head">
+            <div>
+              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 24, margin: 0, letterSpacing: '-0.015em' }}>
+                Manage Activities
+              </h3>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 3 }}>
+                {state.activities.length} total across {state.projects.length} projects
+              </div>
+            </div>
+            <button className="iconbtn" onClick={onClose}><Icon name="close" size={16} /></button>
+          </div>
+
+          <div style={{ display: 'flex', gap: 4, padding: '0 0 16px' }}>
+            {(['all', 'active', 'on_hold', 'complete'] as const).map(s => (
+              <button key={s} onClick={() => setFilterStatus(s)} style={{
+                padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+                fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em',
+                background: filterStatus === s ? 'var(--accent-soft)' : 'transparent',
+                color: filterStatus === s ? 'var(--accent)' : 'var(--ink-3)',
+                border: '1px solid ' + (filterStatus === s ? 'var(--accent)' : 'transparent'),
+              }}>
+                {s === 'all' ? 'All' : s === 'on_hold' ? 'On hold' : s.charAt(0).toUpperCase() + s.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          <div className="drawer-body" style={{ padding: 0 }}>
+            {byProject.length === 0 ? (
+              <div style={{ color: 'var(--ink-3)', fontSize: 12, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '20px 0' }}>
+                No activities
+              </div>
+            ) : byProject.map(({ project, activities }) => (
+              <div key={project.id} style={{ marginBottom: 20 }}>
+                <div style={{
+                  fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase',
+                  letterSpacing: '0.06em', color: 'var(--ink-3)', paddingBottom: 6,
+                  borderBottom: '1px solid var(--line)', marginBottom: 8,
+                  display: 'flex', alignItems: 'center', gap: 10,
+                }}>
+                  <span style={{ color: 'var(--ink)', fontWeight: 600 }}>{project.name}</span>
+                  <span>{project.client}</span>
+                  <span>{activities.length} activit{activities.length === 1 ? 'y' : 'ies'}</span>
+                </div>
+                {activities.map(a => (
+                  <div key={a.id}
+                    onClick={() => { setEditActivityId(a.id); setEditProjectId(a.projectId) }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '8px 10px', borderRadius: 8, cursor: 'pointer', marginBottom: 2,
+                    }}
+                    onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-sunken)'}
+                    onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'transparent'}
+                  >
+                    <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{a.name}</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)' }}>
+                      {a.start || '—'} → {a.end || '—'}
+                    </div>
+                    <span className={`pill${a.priority === 'high' ? ' accent' : ''}`} style={{ fontSize: 10 }}>
+                      <span className="dot" />{a.priority}
+                    </span>
+                    <span style={{
+                      fontFamily: 'var(--font-mono)', fontSize: 10,
+                      color: a.status === 'complete' ? 'var(--accent)' : a.status === 'on_hold' ? 'var(--warn)' : 'var(--ink-3)',
+                    }}>
+                      {a.status === 'on_hold' ? 'on hold' : a.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          <div className="drawer-foot">
+            <div style={{ flex: 1 }} />
+            <button className="btn" onClick={onClose}>Close</button>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
 // ── ProjectsPage ───────────────────────────────────────────────────────────────
 
 export default function ProjectsPage() {
   const state = useCCState()
   const [selected, setSelected] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
-  const [view, setView] = useState<'grid' | 'table'>('grid')
+  const [showManageActivities, setShowManageActivities] = useState(false)
+  const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active')
   const [filter, setFilter] = useState('')
 
-  const visible = state.projects.filter(p =>
-    !filter ||
-    p.name.toLowerCase().includes(filter.toLowerCase()) ||
-    p.client.toLowerCase().includes(filter.toLowerCase())
-  )
+  const visible = state.projects.filter(p => {
+    const matchesSearch = !filter ||
+      p.name.toLowerCase().includes(filter.toLowerCase()) ||
+      p.client.toLowerCase().includes(filter.toLowerCase())
+    return matchesSearch && (activeTab === 'archived' ? p.archived : !p.archived)
+  })
+
+  const tabStyle = (t: 'active' | 'archived') => ({
+    padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+    fontFamily: 'var(--font-mono)' as const, textTransform: 'uppercase' as const, letterSpacing: '0.05em',
+    background: activeTab === t ? 'var(--accent-soft)' : 'transparent',
+    color: activeTab === t ? 'var(--accent)' : 'var(--ink-3)',
+    border: '1px solid ' + (activeTab === t ? 'var(--accent)' : 'transparent'),
+  })
 
   return (
     <div className="subpage">
@@ -852,59 +921,54 @@ export default function ProjectsPage() {
           <button className="btn primary" onClick={() => setShowAdd(true)}>
             <Icon name="plus" size={14} /> New project
           </button>
-          <div className="tabs" style={{ marginBottom: 0 }}>
-            <div className={`tab ${view === 'grid' ? 'active' : ''}`} onClick={() => setView('grid')}>Cards</div>
-            <div className={`tab ${view === 'table' ? 'active' : ''}`} onClick={() => setView('table')}>Table</div>
-          </div>
+          <button className="btn" onClick={() => setShowManageActivities(true)}>
+            Manage Activities
+          </button>
+          <button style={tabStyle('active')} onClick={() => setActiveTab('active')}>Active</button>
+          <button style={tabStyle('archived')} onClick={() => setActiveTab('archived')}>Archived</button>
           <div style={{ flex: 1 }} />
           <input className="input" placeholder="Search projects…" value={filter}
             onChange={e => setFilter(e.target.value)} style={{ width: 240 }} />
         </div>
 
-        {view === 'grid' ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
-            {visible.map(p => (
-              <ProjectCard key={p.id} project={p} state={state} onOpen={() => setSelected(p.id)} />
-            ))}
-          </div>
-        ) : (
-          <table className="table">
-            <thead><tr>
-              <th>Project</th><th>Client</th><th>Contract value</th><th>Activities</th><th>Sites</th><th>Priority</th>
-            </tr></thead>
-            <tbody>
-              {visible.map(p => {
-                const acts = state.activities.filter(a => a.projectId === p.id)
-                const ss = projectSites(state, p.id)
-                return (
-                  <tr key={p.id} onClick={() => setSelected(p.id)} style={{ cursor: 'pointer' }}>
-                    <td style={{ fontWeight: 500 }}>
-                      {p.name}
-                      {p.projectNumber && (
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', marginLeft: 6 }}>
-                          {p.projectNumber}
-                        </span>
-                      )}
-                    </td>
-                    <td>{p.client}</td>
-                    <td className="mono">${(p.contractValue / 1000).toFixed(1)}k</td>
-                    <td className="mono">{acts.length}</td>
-                    <td className="mono">{ss.length}</td>
-                    <td>
-                      <span className={`pill ${p.priority === 'high' ? 'accent' : ''}`}>
-                        <span className="dot" />{p.priority}
+        <table className="table">
+          <thead><tr>
+            <th>Project</th><th>Client</th><th>Contract value</th><th>Dates</th><th>Sites</th><th>Priority</th>
+          </tr></thead>
+          <tbody>
+            {visible.map(p => {
+              const ss = projectSites(state, p.id)
+              return (
+                <tr key={p.id} onClick={() => setSelected(p.id)} style={{ cursor: 'pointer' }}>
+                  <td style={{ fontWeight: 500 }}>
+                    {p.name}
+                    {p.projectNumber && (
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', marginLeft: 6 }}>
+                        {p.projectNumber}
                       </span>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
+                    )}
+                  </td>
+                  <td>{p.client}</td>
+                  <td className="mono">${(p.contractValue / 1000).toFixed(1)}k</td>
+                  <td className="mono" style={{ fontSize: 11 }}>
+                    {p.start || '—'} → {p.end || '—'}
+                  </td>
+                  <td className="mono">{ss.length}</td>
+                  <td>
+                    <span className={`pill ${p.priority === 'high' ? 'accent' : ''}`}>
+                      <span className="dot" />{p.priority}
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
 
       {selected && <ProjectDrawer projectId={selected} state={state} onClose={() => setSelected(null)} />}
       {showAdd && <AddProjectModal state={state} onClose={() => setShowAdd(false)} />}
+      {showManageActivities && <ManageActivitiesModal state={state} onClose={() => setShowManageActivities(false)} />}
     </div>
   )
 }
