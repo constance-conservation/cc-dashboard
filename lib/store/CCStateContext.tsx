@@ -209,8 +209,8 @@ type CCActions = {
   restoreProject:   (id: string) => void
   // Sites
   createSiteForClient: (clientId: string, name: string, notes?: string) => Promise<string | null>
-  createAndLinkSite: (projectId: string, name: string, notes?: string, clientId?: string) => void
-  linkSite:          (projectId: string, siteId: string) => void
+  createAndLinkSite: (projectId: string, name: string, notes?: string, clientId?: string) => Promise<string | null>
+  linkSite:          (projectId: string, siteId: string) => Promise<void>
   unlinkSite:        (projectId: string, siteId: string) => void
   updateSite:        (id: string, patch: Partial<Site>) => void
   deleteSite:        (siteId: string) => void
@@ -590,7 +590,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       return null
     }
 
-    async function createAndLinkSite(projectId: string, name: string, notes?: string, clientId?: string) {
+    async function createAndLinkSite(projectId: string, name: string, notes?: string, clientId?: string): Promise<string | null> {
       const { orgId: oid } = ref()
       const tempSiteId = 'temp-' + Date.now()
       const optimisticSite: Site = { id: tempSiteId, name, notes, active: true, sortOrder: 0, clientId }
@@ -614,7 +614,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           sites: prev.sites.filter(s => s.id !== tempSiteId),
           projectSiteLinks: prev.projectSiteLinks.filter(l => l.siteId !== tempSiteId),
         }))
-        return
+        return null
       }
 
       const realSiteId = (inserted as Record<string, unknown>).id as string
@@ -626,20 +626,34 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         ),
       }))
 
-      db.from('project_site_links')
+      const { error: le } = await db.from('project_site_links')
         .insert({ organization_id: oid, project_id: projectId, site_id: realSiteId, sort_order: 0 })
-        .then(({ error: le }) => { if (le) console.error('createAndLinkSite (link):', le) })
+      if (le) {
+        console.error('createAndLinkSite (link):', le)
+        setState(prev => ({
+          ...prev,
+          projectSiteLinks: prev.projectSiteLinks.filter(l => l.siteId !== realSiteId),
+        }))
+      }
+
+      return realSiteId
     }
 
-    function linkSite(projectId: string, siteId: string) {
+    async function linkSite(projectId: string, siteId: string) {
       const { orgId: oid } = ref()
       setState(prev => ({
         ...prev,
         projectSiteLinks: [...prev.projectSiteLinks, { projectId, siteId, sortOrder: 0 }],
       }))
-      db.from('project_site_links')
+      const { error } = await db.from('project_site_links')
         .insert({ organization_id: oid, project_id: projectId, site_id: siteId, sort_order: 0 })
-        .then(({ error }) => { if (error) console.error('linkSite:', error) })
+      if (error) {
+        console.error('linkSite:', error)
+        setState(prev => ({
+          ...prev,
+          projectSiteLinks: prev.projectSiteLinks.filter(l => !(l.projectId === projectId && l.siteId === siteId)),
+        }))
+      }
     }
 
     function unlinkSite(projectId: string, siteId: string) {

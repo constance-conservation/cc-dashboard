@@ -325,7 +325,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
 
   const canSave = !!(
     (form.name.trim() || form.activityTypeId) &&
-    (sites.length === 0 || form.siteId) &&
+    form.siteId &&
     form.totalAllocation > 0
   )
 
@@ -449,7 +449,6 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
                     <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>Total allocated</span>
                     <span style={{ fontWeight: 600, color: total === form.totalAllocation ? 'var(--accent)' : 'var(--warn)' }}>
                       {total} / {form.totalAllocation} {form.unit}
-                      {total !== form.totalAllocation && <span style={{ color: 'var(--warn)', marginLeft: 6, fontSize: 11 }}>({total > form.totalAllocation ? '+' : ''}{total - form.totalAllocation})</span>}
                     </span>
                   </div>
                   {!existing && (
@@ -474,14 +473,14 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
               onChange={v => setForm({ ...form, crewSizeType: v as CrewSizeType })}
               options={CREW_TYPE_OPTIONS} />
           </Field>
-          <Field label={form.crewSizeType === 'range' ? 'Min crew' : 'Crew size'}>
+          <Field label={form.crewSizeType === 'range' ? 'Minimum' : 'Crew size'}>
             <NumericInput className="input" value={form.minCrew}
               onChange={v => setForm({ ...form, minCrew: v })} min={1} />
           </Field>
         </div>
 
         {form.crewSizeType === 'range' && (
-          <Field label="Max crew">
+          <Field label="Target">
             <NumericInput className="input" value={form.maxCrew ?? 0}
               onChange={v => setForm({ ...form, maxCrew: v || undefined })} min={form.minCrew} />
           </Field>
@@ -858,19 +857,15 @@ function AddProjectModal({ state, onClose }: {
       return
     }
     const projectId = result.id
-    for (const siteId of selectedSiteIds) {
-      state.linkSite(projectId, siteId)
-    }
-    for (const siteName of pendingSiteNames) {
-      await state.createAndLinkSite(projectId, siteName, undefined, selectedClientId)
-    }
-    // Build siteKey → realId map
     const resolvedSiteIds: Record<string, string> = {}
-    selectedSiteIds.forEach(id => { resolvedSiteIds[id] = id })
-    pendingSiteNames.forEach((name, i) => {
-      const site = state.sites.find(s => s.name === name && s.clientId === selectedClientId)
-      if (site) resolvedSiteIds[`pending:${i}`] = site.id
-    })
+    for (const siteId of selectedSiteIds) {
+      await state.linkSite(projectId, siteId)
+      resolvedSiteIds[siteId] = siteId
+    }
+    for (let i = 0; i < pendingSiteNames.length; i++) {
+      const realId = await state.createAndLinkSite(projectId, pendingSiteNames[i], undefined, selectedClientId ?? undefined)
+      if (realId) resolvedSiteIds[`pending:${i}`] = realId
+    }
     // Create pending activities
     for (const act of pendingActivities) {
       const resolvedSiteId = act.siteKey ? resolvedSiteIds[act.siteKey] : undefined
@@ -1253,7 +1248,7 @@ function AddProjectModal({ state, onClose }: {
               </Field>
             </div>
             {activityForm.allocationStrategy === 'custom' && (
-              <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px' }}>
+              <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginBottom: 10 }}>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
                   Monthly allocation
                 </div>
