@@ -703,12 +703,12 @@ function AddProjectModal({ state, onClose }: {
     if (!p.client.trim()) { setSaveError('Client is required.'); return }
     setSaving(true)
     setSaveError(null)
-    const ok = await state.addProject(p)
+    const err = await state.addProject(p)
     setSaving(false)
-    if (ok) {
+    if (err === null) {
       onClose()
     } else {
-      setSaveError('Failed to save — check your connection and try again.')
+      setSaveError(err)
     }
   }
 

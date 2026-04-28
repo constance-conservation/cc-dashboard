@@ -171,7 +171,7 @@ function activityPatch(a: Partial<Activity>): Record<string, unknown> {
 type CCActions = {
   // Projects
   updateProject:    (id: string, patch: Partial<Project>) => void
-  addProject:       (p: Omit<Project, 'id'>) => Promise<boolean>
+  addProject:       (p: Omit<Project, 'id'>) => Promise<string | null>
   deleteProject:    (id: string) => void
   // Sites
   createAndLinkSite: (projectId: string, name: string, notes?: string) => void
@@ -410,18 +410,20 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .then(({ error }) => { if (error) console.error('updateProject:', error) })
     }
 
-    async function addProject(p: Omit<Project, 'id'>): Promise<boolean> {
+    async function addProject(p: Omit<Project, 'id'>): Promise<string | null> {
       const { orgId: oid } = ref()
 
       // Find or create client by name
       let clientId: string | null = null
       if (p.client.trim()) {
-        const { data: existingClients } = await db
+        const { data: existingClients, error: lookupErr } = await db
           .from('clients')
           .select('id')
           .eq('organization_id', oid)
           .ilike('name', p.client)
           .limit(1)
+
+        if (lookupErr) console.warn('addProject — client lookup:', lookupErr)
 
         if (existingClients && existingClients.length > 0) {
           clientId = (existingClients[0] as Record<string, unknown>).id as string
@@ -432,8 +434,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
             .select('id')
             .single()
           if (clientErr) {
-            console.error('addProject — create client:', clientErr)
-            return false
+            console.error('addProject — create client:', clientErr.code, clientErr.message)
+            return `Client error [${clientErr.code}]: ${clientErr.message}`
           }
           clientId = (newClient as Record<string, unknown>).id as string
         }
@@ -455,14 +457,14 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .single()
 
       if (error || !inserted) {
-        console.error('addProject:', error)
-        return false
+        console.error('addProject:', error?.code, error?.message, error?.details, error?.hint)
+        return `[${error?.code ?? '?'}] ${error?.message ?? 'Unknown error'}`
       }
 
       const realId = (inserted as Record<string, unknown>).id as string
       const newProject: Project = { id: realId, ...p }
       setState(prev => ({ ...prev, projects: [...prev.projects, newProject] }))
-      return true
+      return null  // null = success
     }
 
     function deleteProject(id: string) {
