@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 
 type InfoTooltipProps = {
   text: string
@@ -8,23 +8,14 @@ type InfoTooltipProps = {
 
 export function InfoTooltip({ text }: InfoTooltipProps) {
   const [open, setOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function handleOutsideClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleOutsideClick)
-    return () => document.removeEventListener('mousedown', handleOutsideClick)
-  }, [open])
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+    <div
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}
+    >
       <button
-        onClick={() => setOpen(prev => !prev)}
         aria-label="More information"
         style={{
           width: 14,
@@ -52,9 +43,9 @@ export function InfoTooltip({ text }: InfoTooltipProps) {
           role="tooltip"
           style={{
             position: 'absolute',
-            left: 'calc(100% + 6px)',
-            top: '50%',
-            transform: 'translateY(-50%)',
+            bottom: 'calc(100% + 6px)',
+            left: '50%',
+            transform: 'translateX(-50%)',
             width: 220,
             background: 'var(--bg-sunken)',
             border: '1px solid var(--line)',

@@ -160,6 +160,7 @@ export type CCState = {
   activityTypes: ActivityType[]
   activities: Activity[]
   carryovers: ActivityCarryover[]
+  allocations: ActivityAllocation[]
   employees: Employee[]
   archivedEmployees: Employee[]
   skills: string[]
