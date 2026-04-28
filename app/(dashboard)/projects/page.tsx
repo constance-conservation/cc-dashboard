@@ -847,6 +847,12 @@ function AddProjectModal({ state, onClose }: {
     if (!p.end) { setSaveError('End date is required.'); return }
     if (p.contractValue <= 0) { setSaveError('Contract value must be greater than $0.'); return }
     if (selectedSiteIds.length + pendingSiteNames.length === 0) { setSaveError('At least one site is required.'); return }
+    for (const act of pendingActivities) {
+      if (!act.name.trim() || !act.siteKey || act.totalAllocation <= 0) {
+        setSaveError('All activities must have a name, site, and allocation greater than 0.')
+        return
+      }
+    }
 
     setSaving(true)
     setSaveError(null)

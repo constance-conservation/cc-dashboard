@@ -15,9 +15,9 @@ const APPS_OPERATIONS = [
 ]
 
 const APPS_MANAGEMENT = [
-  { id: 'projects',  href: '/projects',   name: 'Projects',       icon: 'projects'  as const, desc: 'Live project list, capacity & budget' },
-  { id: 'clients',   href: '/clients',    name: 'Clients',        icon: 'employees' as const, desc: 'Client directory, contacts & sites' },
   { id: 'employees', href: '/employees',  name: 'Employees',      icon: 'employees' as const, desc: 'Team details, skills & availability' },
+  { id: 'clients',   href: '/clients',    name: 'Clients',        icon: 'employees' as const, desc: 'Client directory, contacts & sites' },
+  { id: 'projects',  href: '/projects',   name: 'Projects',       icon: 'projects'  as const, desc: 'Live project list, capacity & budget' },
   { id: 'finance',   href: '/finances',   name: 'Finances',       icon: 'finance'   as const, desc: 'P&L, invoicing, cash position', comingSoon: true },
 ]
 
