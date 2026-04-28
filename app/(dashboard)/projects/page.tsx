@@ -318,10 +318,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
   }, [state.activityTypes, pendingTypeName])
 
   const sites = projectSites(state, projectId)
-  const siteOptions = [
-    { value: '', label: 'Project-wide (no site)' },
-    ...sites.map(s => ({ value: s.id, label: s.name })),
-  ]
+  const siteOptions = sites.map(s => ({ value: s.id, label: s.name }))
 
   const save = async () => {
     if (!form.name.trim() && !form.activityTypeId) return
@@ -378,13 +375,17 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
             options={PRIORITY_OPTIONS} />
         </Field>
 
-        {sites.length > 0 && (
-          <Field label="Site">
+        <Field label="Site">
+          {sites.length === 0 ? (
+            <div style={{ padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg-sunken)', fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>
+              No sites linked to this project — add sites in the Sites tab first
+            </div>
+          ) : (
             <Select value={form.siteId ?? ''}
               onChange={v => setForm({ ...form, siteId: v || undefined })}
               options={siteOptions} />
-          </Field>
-        )}
+          )}
+        </Field>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Field label="Start date">
@@ -768,6 +769,7 @@ type PendingActivity = {
   unit: WorkUnit
   allocationStrategy: AllocationStrategy
   totalAllocation: number
+  customAllocs: Record<string, number>
   crewSizeType: CrewSizeType
   minCrew: number
   maxCrew?: number
@@ -801,7 +803,7 @@ function AddProjectModal({ state, onClose }: {
   const [expandedActivityIdx, setExpandedActivityIdx] = useState<number | null>(null)
   const [activityForm, setActivityForm] = useState<PendingActivity>({
     name: '', activityTypeId: undefined, siteKey: '', priority: 'medium', unit: 'days',
-    allocationStrategy: 'even', totalAllocation: 0, crewSizeType: 'fixed',
+    allocationStrategy: 'even', totalAllocation: 0, customAllocs: {}, crewSizeType: 'fixed',
     minCrew: 1, maxCrew: undefined, chargeOutRate: 0,
     overtimeFlag: false, overtimeRate: 1.5, skills: [], start: '', end: '',
     notes: undefined,
@@ -875,7 +877,7 @@ function AddProjectModal({ state, onClose }: {
     // Create pending activities
     for (const act of pendingActivities) {
       const resolvedSiteId = act.siteKey ? resolvedSiteIds[act.siteKey] : undefined
-      await state.addActivity({
+      const activityId = await state.addActivity({
         projectId,
         siteId: resolvedSiteId,
         activityTypeId: act.activityTypeId,
@@ -898,6 +900,11 @@ function AddProjectModal({ state, onClose }: {
         notes: act.notes,
         sortOrder: 0,
       })
+      if (activityId && act.allocationStrategy === 'custom') {
+        const months = monthsBetween(act.start, act.end)
+        const periods = months.map(m => ({ period: m, allocation: act.customAllocs[m] ?? 0 }))
+        await state.setActivityAllocations(activityId, periods)
+      }
     }
     setSaving(false)
     onClose()
@@ -1063,10 +1070,132 @@ function AddProjectModal({ state, onClose }: {
             </div>
             {/* Expanded edit form */}
             {expandedActivityIdx === idx && (
-              <div style={{ padding: '12px', borderTop: '1px solid var(--line)' }}>
-                <Field label="Activity name">
-                  <input className="input" value={a.name}
-                    onChange={e => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} />
+              <div style={{ padding: '12px', borderTop: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <Field label="Activity">
+                  <ActivityTypeahead
+                    value={a.activityTypeId ?? ''}
+                    displayName={a.name}
+                    activityTypes={state.activityTypes}
+                    onChange={(id, name) => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, activityTypeId: id, name } : x))}
+                    onAddNew={async (name) => {
+                      state.addActivityType(name)
+                      await new Promise(r => setTimeout(r, 100))
+                      const found = state.activityTypes.find(t => t.name === name)
+                      return found?.id ?? name
+                    }}
+                  />
+                </Field>
+                {(() => {
+                  const siteOpts = [
+                    { value: '', label: 'Select site…' },
+                    ...selectedSiteIds.map(id => ({ value: id, label: state.sites.find(s => s.id === id)?.name ?? id })),
+                    ...pendingSiteNames.map((name, i) => ({ value: `pending:${i}`, label: `${name} (new)` })),
+                  ]
+                  return (
+                    <Field label="Site">
+                      <Select value={a.siteKey ?? ''}
+                        onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, siteKey: v } : x))}
+                        options={siteOpts} />
+                    </Field>
+                  )
+                })()}
+                <Field label="Priority">
+                  <Select value={a.priority}
+                    onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, priority: v as Priority } : x))}
+                    options={PRIORITY_OPTIONS} />
+                </Field>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <Field label="Start date">
+                    <input className="input" type="date" value={a.start}
+                      onChange={e => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, start: e.target.value } : x))} />
+                  </Field>
+                  <Field label="End date">
+                    <input className="input" type="date" value={a.end}
+                      onChange={e => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, end: e.target.value } : x))} />
+                  </Field>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <Field label="Work unit">
+                    <Select value={a.unit}
+                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, unit: v as WorkUnit } : x))}
+                      options={UNIT_OPTIONS} />
+                  </Field>
+                  <Field label="Allocation strategy">
+                    <Select value={a.allocationStrategy}
+                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, allocationStrategy: v as AllocationStrategy } : x))}
+                      options={ALLOCATION_OPTIONS} />
+                  </Field>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <Field label={`Total ${a.unit}`}>
+                    <NumericInput className="input" value={a.totalAllocation}
+                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, totalAllocation: v } : x))} min={0} />
+                  </Field>
+                  <Field label="Crew size">
+                    <NumericInput className="input" value={a.minCrew}
+                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, minCrew: v } : x))} min={1} />
+                  </Field>
+                </div>
+                {a.allocationStrategy === 'custom' && (
+                  <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px' }}>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
+                      Monthly allocation
+                    </div>
+                    {!a.start || !a.end ? (
+                      <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>Set start and end dates to configure monthly allocation</div>
+                    ) : (() => {
+                      const months = monthsBetween(a.start, a.end)
+                      const allocs = a.customAllocs ?? {}
+                      const total = months.reduce((s, m) => s + (allocs[m] ?? 0), 0)
+                      return (
+                        <>
+                          {months.map(m => {
+                            const [y, mo] = m.split('-')
+                            const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })
+                            return (
+                              <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                                <div style={{ width: 80, fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{label}</div>
+                                <NumericInput className="input" style={{ width: 80 }} min={0}
+                                  value={allocs[m] ?? 0}
+                                  onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, customAllocs: { ...(x.customAllocs ?? {}), [m]: v } } : x))} />
+                                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{a.unit}</span>
+                              </div>
+                            )
+                          })}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)', fontSize: 12 }}>
+                            <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>Total allocated</span>
+                            <span style={{ fontWeight: 600, color: total === a.totalAllocation ? 'var(--accent)' : 'var(--warn)' }}>
+                              {total} / {a.totalAllocation} {a.unit}
+                            </span>
+                          </div>
+                        </>
+                      )
+                    })()}
+                  </div>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <Field label="Charge-out rate ($)">
+                    <NumericInput className="input" value={a.chargeOutRate}
+                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, chargeOutRate: v } : x))} min={0} />
+                  </Field>
+                  <Field label="Overtime">
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={a.overtimeFlag}
+                          onChange={e => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, overtimeFlag: e.target.checked } : x))} />
+                        Allow
+                      </label>
+                      <NumericInput className="input" step="0.1" value={a.overtimeRate}
+                        onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, overtimeRate: v } : x))}
+                        style={{ width: 70 }} disabled={!a.overtimeFlag} />
+                      <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>× rate</span>
+                    </div>
+                  </Field>
+                </div>
+                <Field label="Notes (optional)">
+                  <textarea className="input" rows={2} value={a.notes ?? ''}
+                    onChange={e => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, notes: e.target.value || undefined } : x))}
+                    style={{ resize: 'vertical', fontFamily: 'inherit' }} />
                 </Field>
               </div>
             )}
@@ -1147,6 +1276,42 @@ function AddProjectModal({ state, onClose }: {
                   onChange={v => setActivityForm({ ...activityForm, minCrew: v })} min={1} />
               </Field>
             </div>
+            {activityForm.allocationStrategy === 'custom' && (
+              <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px' }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
+                  Monthly allocation
+                </div>
+                {!activityForm.start || !activityForm.end ? (
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>Set start and end dates to configure monthly allocation</div>
+                ) : (() => {
+                  const months = monthsBetween(activityForm.start, activityForm.end)
+                  const total = months.reduce((s, m) => s + (activityForm.customAllocs[m] ?? 0), 0)
+                  return (
+                    <>
+                      {months.map(m => {
+                        const [y, mo] = m.split('-')
+                        const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })
+                        return (
+                          <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                            <div style={{ width: 80, fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{label}</div>
+                            <NumericInput className="input" style={{ width: 80 }} min={0}
+                              value={activityForm.customAllocs[m] ?? 0}
+                              onChange={v => setActivityForm({ ...activityForm, customAllocs: { ...activityForm.customAllocs, [m]: v } })} />
+                            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{activityForm.unit}</span>
+                          </div>
+                        )
+                      })}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)', fontSize: 12 }}>
+                        <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>Total allocated</span>
+                        <span style={{ fontWeight: 600, color: total === activityForm.totalAllocation ? 'var(--accent)' : 'var(--warn)' }}>
+                          {total} / {activityForm.totalAllocation} {activityForm.unit}
+                        </span>
+                      </div>
+                    </>
+                  )
+                })()}
+              </div>
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <Field label="Charge-out rate ($)">
                 <NumericInput className="input" value={activityForm.chargeOutRate}
@@ -1178,7 +1343,7 @@ function AddProjectModal({ state, onClose }: {
                   if (!activityForm.name.trim()) return
                   if (!activityForm.siteKey) return
                   setPendingActivities(prev => [...prev, { ...activityForm }])
-                  setActivityForm({ name: '', activityTypeId: undefined, siteKey: '', priority: 'medium', unit: 'days', allocationStrategy: 'even', totalAllocation: 0, crewSizeType: 'fixed', minCrew: 1, maxCrew: undefined, chargeOutRate: 0, overtimeFlag: false, overtimeRate: 1.5, skills: [], start: '', end: '', notes: undefined })
+                  setActivityForm({ name: '', activityTypeId: undefined, siteKey: '', priority: 'medium', unit: 'days', allocationStrategy: 'even', totalAllocation: 0, customAllocs: {}, crewSizeType: 'fixed', minCrew: 1, maxCrew: undefined, chargeOutRate: 0, overtimeFlag: false, overtimeRate: 1.5, skills: [], start: '', end: '', notes: undefined })
                   setShowActivityForm(false)
                 }}>
                 Add activity
@@ -1187,9 +1352,18 @@ function AddProjectModal({ state, onClose }: {
             </div>
           </div>
         ) : (
-          <button className="btn" type="button" onClick={() => setShowActivityForm(true)}>
-            <Icon name="plus" size={14} /> Add activity
-          </button>
+          <>
+            <button className="btn" type="button"
+              disabled={selectedSiteIds.length + pendingSiteNames.length === 0}
+              onClick={() => setShowActivityForm(true)}>
+              <Icon name="plus" size={14} /> Add activity
+            </button>
+            {selectedSiteIds.length + pendingSiteNames.length === 0 && selectedClientId && (
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>
+                Add at least one site above before adding activities
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -1238,8 +1412,6 @@ function ActivityTypesModal({ state, onClose }: {
     state.updateActivityType(editId, { name: editName.trim(), description: editDesc.trim() || undefined })
     setEditId(null)
   }
-
-  const typeInUse = (id: string) => state.activities.some(a => a.activityTypeId === id)
 
   return (
     <>
@@ -1315,11 +1487,6 @@ function ActivityTypesModal({ state, onClose }: {
                           <div style={{ fontSize: 13, fontWeight: 500 }}>{t.name}</div>
                           {t.description && <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 1 }}>{t.description}</div>}
                         </div>
-                        {typeInUse(t.id) && (
-                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)' }}>
-                            {state.activities.filter(a => a.activityTypeId === t.id).length} in use
-                          </span>
-                        )}
                         <button className="iconbtn" onClick={() => startEdit(t)} style={{ color: 'var(--ink-3)' }}>
                           <Icon name="edit" size={13} />
                         </button>

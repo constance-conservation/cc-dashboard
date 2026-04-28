@@ -219,7 +219,7 @@ type CCActions = {
   updateActivityType: (id: string, patch: { name?: string; description?: string }) => void
   deleteActivityType: (id: string) => void
   // Activities
-  addActivity:      (a: Omit<Activity, 'id'>) => void
+  addActivity:      (a: Omit<Activity, 'id'>) => Promise<string>
   updateActivity:   (id: string, patch: Partial<Activity>) => void
   deleteActivity:   (id: string) => void
   // Carryovers
@@ -733,7 +733,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
 
     // ── Activities ─────────────────────────────────────────────
 
-    async function addActivity(a: Omit<Activity, 'id'>) {
+    async function addActivity(a: Omit<Activity, 'id'>): Promise<string> {
       const tempId = 'temp-' + Date.now()
       const optimistic: Activity = { id: tempId, ...a }
       setState(prev => ({ ...prev, activities: [...prev.activities, optimistic] }))
@@ -771,7 +771,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       if (error || !inserted) {
         console.error('addActivity:', error)
         setState(prev => ({ ...prev, activities: prev.activities.filter(x => x.id !== tempId) }))
-        return
+        return ''
       }
 
       const realId = (inserted as Record<string, unknown>).id as string
@@ -779,6 +779,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         ...prev,
         activities: prev.activities.map(x => x.id === tempId ? { ...x, id: realId } : x),
       }))
+      return realId
     }
 
     function updateActivity(id: string, patch: Partial<Activity>) {
