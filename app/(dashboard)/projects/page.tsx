@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer, Field } from '@/components/dashboard/Drawer'
@@ -235,23 +236,22 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
         onDelete={existing ? () => setConfirmDelete(true) : undefined}
         saveLabel={existing ? 'Save' : 'Add activity'}
       >
+        <Field label="Activity type (optional)">
+          <Select value={form.activityTypeId ?? ''}
+            onChange={v => setForm({ ...form, activityTypeId: v || undefined })}
+            options={[{ value: '', label: 'None' }, ...state.activityTypes.map(t => ({ value: t.id, label: t.name }))]} />
+        </Field>
+
         <Field label="Activity name">
           <input className="input" value={form.name}
             onChange={e => setForm({ ...form, name: e.target.value })} autoFocus />
         </Field>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <Field label="Priority">
-            <Select value={form.priority}
-              onChange={v => setForm({ ...form, priority: v as Priority })}
-              options={PRIORITY_OPTIONS} />
-          </Field>
-          <Field label="Status">
-            <Select value={form.status}
-              onChange={v => setForm({ ...form, status: v as ActivityStatus })}
-              options={STATUS_OPTIONS} />
-          </Field>
-        </div>
+        <Field label="Priority">
+          <Select value={form.priority}
+            onChange={v => setForm({ ...form, priority: v as Priority })}
+            options={PRIORITY_OPTIONS} />
+        </Field>
 
         {sites.length > 0 && (
           <Field label="Site">
@@ -290,21 +290,10 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
           </Field>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <Field label={`Total ${form.unit}`}>
-            <NumericInput className="input" value={form.totalAllocation}
-              onChange={v => setForm({ ...form, totalAllocation: v })} min={0} />
-          </Field>
-          <Field label={
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              Already completed
-              <InfoTooltip text="Set this when entering a project already in progress — the number of days/hours completed before this system entry. This offsets the remaining allocation." />
-            </span>
-          }>
-            <NumericInput className="input" value={form.unitsCompleted}
-              onChange={v => setForm({ ...form, unitsCompleted: v })} min={0} />
-          </Field>
-        </div>
+        <Field label={`Total ${form.unit}`}>
+          <NumericInput className="input" value={form.totalAllocation}
+            onChange={v => setForm({ ...form, totalAllocation: v })} min={0} />
+        </Field>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Field label={
@@ -387,7 +376,7 @@ function ProjectDrawer({ projectId, state, onClose }: {
   const linkedIds = new Set(sites.map(s => s.id))
   const activities = state.activities.filter(a => a.projectId === projectId)
 
-  const saveDetails = () => { state.updateProject(p.id, edit); onClose() }
+  const saveDetails = () => { state.updateProject(p.id, { ...edit, client: p.client }); onClose() }
 
   const tabStyle = (t: DrawerTab) => ({
     padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
@@ -448,8 +437,9 @@ function ProjectDrawer({ projectId, state, onClose }: {
                 onChange={e => setEdit({ ...edit, name: e.target.value })} />
             </Field>
             <Field label="Client">
-              <input className="input" value={edit.client}
-                onChange={e => setEdit({ ...edit, client: e.target.value })} />
+              <div style={{ padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg-sunken)', fontSize: 13, color: 'var(--ink-3)' }}>
+                {p.client || '—'}
+              </div>
             </Field>
             <Field label="Project number (optional)">
               <input className="input" value={edit.projectNumber ?? ''}
@@ -602,6 +592,25 @@ function ProjectDrawer({ projectId, state, onClose }: {
 
 // ── AddProjectModal ────────────────────────────────────────────────────────────
 
+type PendingActivity = {
+  name: string
+  activityTypeId?: string
+  priority: Priority
+  unit: WorkUnit
+  allocationStrategy: AllocationStrategy
+  totalAllocation: number
+  crewSizeType: CrewSizeType
+  minCrew: number
+  maxCrew?: number
+  chargeOutRate: number
+  overtimeFlag: boolean
+  overtimeRate: number
+  skills: string[]
+  start: string
+  end: string
+  notes?: string
+}
+
 function AddProjectModal({ state, onClose }: {
   state: ReturnType<typeof useCCState>
   onClose: () => void
@@ -618,6 +627,16 @@ function AddProjectModal({ state, onClose }: {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const clientDropRef = useRef<HTMLDivElement>(null)
+  const [pendingActivities, setPendingActivities] = useState<PendingActivity[]>([])
+  const [showActivityForm, setShowActivityForm] = useState(false)
+  const [expandedActivityIdx, setExpandedActivityIdx] = useState<number | null>(null)
+  const [activityForm, setActivityForm] = useState<PendingActivity>({
+    name: '', activityTypeId: undefined, priority: 'medium', unit: 'days',
+    allocationStrategy: 'even', totalAllocation: 0, crewSizeType: 'fixed',
+    minCrew: 1, maxCrew: undefined, chargeOutRate: 0,
+    overtimeFlag: false, overtimeRate: 1.5, skills: [], start: '', end: '',
+    notes: undefined,
+  })
 
   useEffect(() => {
     function handleOutsideClick(e: MouseEvent) {
@@ -676,6 +695,32 @@ function AddProjectModal({ state, onClose }: {
     }
     for (const siteName of pendingSiteNames) {
       await state.createAndLinkSite(projectId, siteName, undefined, selectedClientId)
+    }
+    // Create pending activities
+    for (const act of pendingActivities) {
+      await state.addActivity({
+        projectId,
+        siteId: undefined,
+        activityTypeId: act.activityTypeId,
+        name: act.name,
+        allocationStrategy: act.allocationStrategy,
+        unit: act.unit,
+        totalAllocation: act.totalAllocation,
+        unitsCompleted: 0,
+        crewSizeType: act.crewSizeType,
+        minCrew: act.minCrew,
+        maxCrew: act.maxCrew,
+        chargeOutRate: act.chargeOutRate,
+        overtimeFlag: act.overtimeFlag,
+        overtimeRate: act.overtimeRate,
+        skills: act.skills,
+        priority: act.priority,
+        status: 'active',
+        start: act.start,
+        end: act.end,
+        notes: act.notes,
+        sortOrder: 0,
+      })
     }
     setSaving(false)
     onClose()
@@ -804,6 +849,138 @@ function AddProjectModal({ state, onClose }: {
           <NumericInput className="input" value={p.contractValue}
             onChange={v => setP({ ...p, contractValue: v })} min={0} />
         </Field>
+      </div>
+
+      {/* Activities section */}
+      <div style={{ borderTop: '1px solid var(--line)', paddingTop: 16, marginTop: 6 }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 12 }}>
+          Activities
+        </div>
+
+        {/* Collapsed activity cards */}
+        {pendingActivities.map((a, idx) => (
+          <div key={idx} style={{ border: '1px solid var(--line)', borderRadius: 8, marginBottom: 8, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', cursor: 'pointer', background: expandedActivityIdx === idx ? 'var(--bg-sunken)' : 'transparent' }}
+              onClick={() => setExpandedActivityIdx(expandedActivityIdx === idx ? null : idx)}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{a.name}</div>
+                <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+                  {a.activityTypeId ? (state.activityTypes.find(t => t.id === a.activityTypeId)?.name ?? '') : ''}
+                  {a.start && a.end ? ` · ${a.start} → ${a.end}` : ''}
+                </div>
+              </div>
+              <span className={`pill${a.priority === 'high' ? ' accent' : ''}`} style={{ fontSize: 10 }}>
+                <span className="dot" />{a.priority}
+              </span>
+              <button className="iconbtn" type="button" style={{ color: 'var(--danger)' }}
+                onClick={e => { e.stopPropagation(); setPendingActivities(prev => prev.filter((_, i) => i !== idx)); if (expandedActivityIdx === idx) setExpandedActivityIdx(null) }}>
+                <Icon name="trash" size={12} />
+              </button>
+            </div>
+            {/* Expanded edit form */}
+            {expandedActivityIdx === idx && (
+              <div style={{ padding: '12px', borderTop: '1px solid var(--line)' }}>
+                <Field label="Activity name">
+                  <input className="input" value={a.name}
+                    onChange={e => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} />
+                </Field>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Add activity form */}
+        {showActivityForm ? (
+          <div style={{ border: '1px solid var(--accent)', borderRadius: 10, padding: '14px', marginBottom: 8 }}>
+            <Field label="Activity type (optional)">
+              <Select value={activityForm.activityTypeId ?? ''}
+                onChange={v => setActivityForm({ ...activityForm, activityTypeId: v || undefined })}
+                options={[{ value: '', label: 'None' }, ...state.activityTypes.map(t => ({ value: t.id, label: t.name }))]} />
+            </Field>
+            <Field label="Activity name">
+              <input className="input" value={activityForm.name} autoFocus
+                onChange={e => setActivityForm({ ...activityForm, name: e.target.value })} />
+            </Field>
+            <Field label="Priority">
+              <Select value={activityForm.priority}
+                onChange={v => setActivityForm({ ...activityForm, priority: v as Priority })}
+                options={PRIORITY_OPTIONS} />
+            </Field>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <Field label="Start date">
+                <input className="input" type="date" value={activityForm.start}
+                  onChange={e => setActivityForm({ ...activityForm, start: e.target.value })} />
+              </Field>
+              <Field label="End date">
+                <input className="input" type="date" value={activityForm.end}
+                  onChange={e => setActivityForm({ ...activityForm, end: e.target.value })} />
+              </Field>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <Field label="Work unit">
+                <Select value={activityForm.unit}
+                  onChange={v => setActivityForm({ ...activityForm, unit: v as WorkUnit })}
+                  options={UNIT_OPTIONS} />
+              </Field>
+              <Field label="Allocation strategy">
+                <Select value={activityForm.allocationStrategy}
+                  onChange={v => setActivityForm({ ...activityForm, allocationStrategy: v as AllocationStrategy })}
+                  options={ALLOCATION_OPTIONS} />
+              </Field>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <Field label={`Total ${activityForm.unit}`}>
+                <NumericInput className="input" value={activityForm.totalAllocation}
+                  onChange={v => setActivityForm({ ...activityForm, totalAllocation: v })} min={0} />
+              </Field>
+              <Field label="Crew size">
+                <NumericInput className="input" value={activityForm.minCrew}
+                  onChange={v => setActivityForm({ ...activityForm, minCrew: v })} min={1} />
+              </Field>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <Field label="Charge-out rate ($)">
+                <NumericInput className="input" value={activityForm.chargeOutRate}
+                  onChange={v => setActivityForm({ ...activityForm, chargeOutRate: v })} min={0} />
+              </Field>
+              <Field label="Overtime">
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={activityForm.overtimeFlag}
+                      onChange={e => setActivityForm({ ...activityForm, overtimeFlag: e.target.checked })} />
+                    Allow
+                  </label>
+                  <NumericInput className="input" step="0.1" value={activityForm.overtimeRate}
+                    onChange={v => setActivityForm({ ...activityForm, overtimeRate: v })}
+                    style={{ width: 70 }} disabled={!activityForm.overtimeFlag} />
+                  <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>× rate</span>
+                </div>
+              </Field>
+            </div>
+            <Field label="Notes (optional)">
+              <textarea className="input" rows={2} value={activityForm.notes ?? ''}
+                onChange={e => setActivityForm({ ...activityForm, notes: e.target.value || undefined })}
+                style={{ resize: 'vertical', fontFamily: 'inherit' }} />
+            </Field>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button className="btn primary" type="button"
+                disabled={!activityForm.name.trim()}
+                onClick={() => {
+                  if (!activityForm.name.trim()) return
+                  setPendingActivities(prev => [...prev, { ...activityForm }])
+                  setActivityForm({ name: '', activityTypeId: undefined, priority: 'medium', unit: 'days', allocationStrategy: 'even', totalAllocation: 0, crewSizeType: 'fixed', minCrew: 1, maxCrew: undefined, chargeOutRate: 0, overtimeFlag: false, overtimeRate: 1.5, skills: [], start: '', end: '', notes: undefined })
+                  setShowActivityForm(false)
+                }}>
+                Add activity
+              </button>
+              <button className="btn" type="button" onClick={() => setShowActivityForm(false)}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button className="btn" type="button" onClick={() => setShowActivityForm(true)}>
+            <Icon name="plus" size={14} /> Add activity
+          </button>
+        )}
       </div>
 
       {saveError && (
@@ -961,11 +1138,19 @@ function ActivityTypesModal({ state, onClose }: {
 
 export default function ProjectsPage() {
   const state = useCCState()
+  const searchParams = useSearchParams()
   const [selected, setSelected] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [showActivityTypes, setShowActivityTypes] = useState(false)
   const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active')
   const [filter, setFilter] = useState('')
+
+  useEffect(() => {
+    const id = searchParams.get('open')
+    if (!id) return
+    const match = state.projects.find(p => p.id === id)
+    if (match) setSelected(id)
+  }, [searchParams])
 
   const visible = state.projects.filter(p => {
     const matchesSearch = !filter ||
