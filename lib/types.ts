@@ -41,14 +41,19 @@ export type Project = {
   projectNumber?: string
 }
 
-// Physical location within a project (one project can have many sites).
+// Physical location in the organisation's location library.
 export type Site = {
   id: string
-  projectId: string
   name: string
-  address?: string
   notes?: string
   active: boolean
+  sortOrder: number
+}
+
+// Links an org site to a specific project contract (many-to-many).
+export type ProjectSiteLink = {
+  projectId: string
+  siteId: string
   sortOrder: number
 }
 
@@ -135,6 +140,7 @@ export type Roster = Record<string, RosterAssignment[]>
 export type CCState = {
   projects: Project[]
   sites: Site[]
+  projectSiteLinks: ProjectSiteLink[]
   activityTypes: ActivityType[]
   activities: Activity[]
   carryovers: ActivityCarryover[]

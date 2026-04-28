@@ -12,6 +12,13 @@ import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
 import type { Project, Site, Activity, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus } from '@/lib/types'
 
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function projectSites(state: ReturnType<typeof useCCState>, projectId: string): Site[] {
+  const ids = new Set(state.projectSiteLinks.filter(l => l.projectId === projectId).map(l => l.siteId))
+  return state.sites.filter(s => ids.has(s.id))
+}
+
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const PRIORITY_OPTIONS = [
@@ -78,6 +85,81 @@ function SkillsEditor({ selected, allSkills, onChange, onAddSkill }: {
   )
 }
 
+// ── SiteSearchDropdown ─────────────────────────────────────────────────────────
+
+function SiteSearchDropdown({ linkedIds, allOrgSites, onLink, onCreateAndLink }: {
+  linkedIds: Set<string>
+  allOrgSites: Site[]
+  onLink: (siteId: string) => void
+  onCreateAndLink: (name: string) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    if (open) document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [open])
+
+  const q = query.trim().toLowerCase()
+  const available = allOrgSites.filter(s => !linkedIds.has(s.id))
+  const filtered = q === '' ? available : available.filter(s => s.name.toLowerCase().includes(q))
+  const exactMatch = q !== '' && allOrgSites.some(s => s.name.toLowerCase() === q)
+  const showCreate = q !== '' && !exactMatch
+  const showDropdown = open && (filtered.length > 0 || showCreate)
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <input
+        className="input"
+        placeholder={available.length === 0 ? 'All locations linked — type to create new…' : 'Search locations or add new…'}
+        value={query}
+        onChange={e => { setQuery(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        style={{ width: '100%' }}
+      />
+      {showDropdown && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 100,
+          background: 'var(--bg-elev)', border: '1px solid var(--line)',
+          borderRadius: 10, boxShadow: '0 8px 24px oklch(0.18 0.015 150 / 0.12)',
+          maxHeight: 220, overflowY: 'auto',
+        }}>
+          {filtered.map((s, i) => (
+            <button key={s.id} type="button"
+              onClick={() => { onLink(s.id); setQuery(''); setOpen(false) }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '9px 14px', fontSize: 13,
+                background: 'transparent', color: 'var(--ink)', cursor: 'pointer', border: 'none',
+                borderBottom: i < filtered.length - 1 || showCreate ? '1px solid var(--line)' : 'none',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-sunken)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+            >{s.name}</button>
+          ))}
+          {showCreate && (
+            <button type="button"
+              onClick={() => { onCreateAndLink(query.trim()); setQuery(''); setOpen(false) }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '9px 14px', fontSize: 13,
+                background: 'transparent', color: 'var(--accent)', cursor: 'pointer', border: 'none', fontWeight: 500,
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-soft)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+            >+ Create "{query.trim()}"</button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── ActivityDrawer ─────────────────────────────────────────────────────────────
 
 type ActivityFormState = Omit<Activity, 'id'>
@@ -118,7 +200,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
   const [form, setForm] = useState<ActivityFormState>(existing ? { ...existing } : emptyActivity(projectId))
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  const sites = state.sites.filter(s => s.projectId === projectId)
+  const sites = projectSites(state, projectId)
   const siteOptions = [
     { value: '', label: 'Project-wide (no site)' },
     ...sites.map(s => ({ value: s.id, label: s.name })),
@@ -301,24 +383,12 @@ function ProjectDrawer({ projectId, state, onClose }: {
   const [confirmDeleteSite, setConfirmDeleteSite] = useState<string | null>(null)
   const [editActivityId, setEditActivityId] = useState<string | null | 'new'>(null)
   const [editSiteId, setEditSiteId] = useState<string | null>(null)
-  const [newSite, setNewSite] = useState({ name: '', address: '' })
 
-  const sites = state.sites.filter(s => s.projectId === projectId)
+  const sites = projectSites(state, projectId)
+  const linkedIds = new Set(sites.map(s => s.id))
   const activities = state.activities.filter(a => a.projectId === projectId)
 
   const saveDetails = () => { state.updateProject(p.id, edit); onClose() }
-
-  const addSite = () => {
-    if (!newSite.name.trim()) return
-    state.addSite({
-      projectId,
-      name: newSite.name.trim(),
-      address: newSite.address.trim() || undefined,
-      active: true,
-      sortOrder: sites.length,
-    })
-    setNewSite({ name: '', address: '' })
-  }
 
   const tabStyle = (t: DrawerTab) => ({
     padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
@@ -342,11 +412,11 @@ function ProjectDrawer({ projectId, state, onClose }: {
       )}
       {confirmDeleteSite && (
         <ConfirmDialog
-          title="Delete site?"
-          message="This will remove the site. Activities assigned to this site will become project-wide."
-          confirmLabel="Delete site"
+          title="Remove site from project?"
+          message="This will unlink the site from this project. Activities assigned to this site will become project-wide."
+          confirmLabel="Remove site"
           danger
-          onConfirm={() => { state.deleteSite(confirmDeleteSite); setConfirmDeleteSite(null) }}
+          onConfirm={() => { state.unlinkSite(projectId, confirmDeleteSite); setConfirmDeleteSite(null) }}
           onCancel={() => setConfirmDeleteSite(null)}
         />
       )}
@@ -432,16 +502,12 @@ function ProjectDrawer({ projectId, state, onClose }: {
                   <>
                     <input className="input" defaultValue={s.name} style={{ flex: 1 }}
                       onBlur={e => state.updateSite(s.id, { name: e.target.value })} />
-                    <input className="input" defaultValue={s.address ?? ''} style={{ flex: 1 }}
-                      placeholder="Address (optional)"
-                      onBlur={e => state.updateSite(s.id, { address: e.target.value || undefined })} />
                     <button className="btn" onClick={() => setEditSiteId(null)}>Done</button>
                   </>
                 ) : (
                   <>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13, fontWeight: 500 }}>{s.name}</div>
-                      {s.address && <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{s.address}</div>}
                     </div>
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)' }}>
                       {activities.filter(a => a.siteId === s.id).length} activities
@@ -459,17 +525,14 @@ function ProjectDrawer({ projectId, state, onClose }: {
             ))}
             <div style={{ marginTop: 16 }}>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 6 }}>
-                Add site
+                Link location
               </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input className="input" style={{ flex: 1 }} placeholder="Site name…"
-                  value={newSite.name} onChange={e => setNewSite({ ...newSite, name: e.target.value })} />
-                <input className="input" style={{ flex: 1 }} placeholder="Address (optional)"
-                  value={newSite.address} onChange={e => setNewSite({ ...newSite, address: e.target.value })} />
-                <button className="btn primary" onClick={addSite}>
-                  <Icon name="plus" size={12} /> Add
-                </button>
-              </div>
+              <SiteSearchDropdown
+                linkedIds={linkedIds}
+                allOrgSites={state.sites}
+                onLink={siteId => state.linkSite(projectId, siteId)}
+                onCreateAndLink={name => state.createAndLinkSite(projectId, name)}
+              />
             </div>
           </>
         )}
@@ -546,7 +609,7 @@ function ProjectCard({ project, state, onOpen }: {
 }) {
   const p = project
   const activities = state.activities.filter(a => a.projectId === p.id)
-  const sites = state.sites.filter(s => s.projectId === p.id)
+  const sites = projectSites(state, p.id)
   const activeCount = activities.filter(a => a.status === 'active').length
 
   return (
@@ -791,7 +854,7 @@ export default function ProjectsPage() {
             <tbody>
               {visible.map(p => {
                 const acts = state.activities.filter(a => a.projectId === p.id)
-                const ss = state.sites.filter(s => s.projectId === p.id)
+                const ss = projectSites(state, p.id)
                 return (
                   <tr key={p.id} onClick={() => setSelected(p.id)} style={{ cursor: 'pointer' }}>
                     <td style={{ fontWeight: 500 }}>

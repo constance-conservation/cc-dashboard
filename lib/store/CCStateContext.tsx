@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react'
 import type {
-  CCState, Project, Site, ActivityType, Activity, ActivityCarryover,
+  CCState, Project, Site, ProjectSiteLink, ActivityType, Activity, ActivityCarryover,
   Employee, Task, Roster, RosterAssignment,
   EmploymentType, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus, CarryoverStatus,
 } from '@/lib/types'
@@ -44,11 +44,17 @@ function rowToProject(r: Record<string, unknown>): Project {
 function rowToSite(r: Record<string, unknown>): Site {
   return {
     id: r.id as string,
-    projectId: r.project_id as string,
     name: (r.name as string) ?? '',
-    address: (r.address as string) || undefined,
     notes: (r.notes as string) || undefined,
     active: (r.active as boolean) ?? true,
+    sortOrder: (r.sort_order as number) ?? 0,
+  }
+}
+
+function rowToProjectSiteLink(r: Record<string, unknown>): ProjectSiteLink {
+  return {
+    projectId: r.project_id as string,
+    siteId: r.site_id as string,
     sortOrder: (r.sort_order as number) ?? 0,
   }
 }
@@ -129,7 +135,6 @@ function contractPatch(p: Partial<Project>): Record<string, unknown> {
 function sitePatch(s: Partial<Site>): Record<string, unknown> {
   const row: Record<string, unknown> = {}
   if (s.name !== undefined)      row.name       = s.name
-  if (s.address !== undefined)   row.address    = s.address
   if (s.notes !== undefined)     row.notes      = s.notes
   if (s.active !== undefined)    row.active     = s.active
   if (s.sortOrder !== undefined) row.sort_order = s.sortOrder
@@ -169,9 +174,10 @@ type CCActions = {
   addProject:       (p: Omit<Project, 'id'>) => void
   deleteProject:    (id: string) => void
   // Sites
-  addSite:          (s: Omit<Site, 'id'>) => void
-  updateSite:       (id: string, patch: Partial<Site>) => void
-  deleteSite:       (id: string) => void
+  createAndLinkSite: (projectId: string, name: string, notes?: string) => void
+  linkSite:          (projectId: string, siteId: string) => void
+  unlinkSite:        (projectId: string, siteId: string) => void
+  updateSite:        (id: string, patch: Partial<Site>) => void
   // Activities
   addActivity:      (a: Omit<Activity, 'id'>) => void
   updateActivity:   (id: string, patch: Partial<Activity>) => void
@@ -211,7 +217,7 @@ type CCContext = CCState & CCActions
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const EMPTY_STATE: CCState = {
-  projects: [], sites: [], activityTypes: [], activities: [], carryovers: [],
+  projects: [], sites: [], projectSiteLinks: [], activityTypes: [], activities: [], carryovers: [],
   employees: [], archivedEmployees: [], skills: [], roles: [],
   tasks: [], roster: {}, rosterMonth: new Date().toISOString().slice(0, 7),
 }
@@ -269,9 +275,10 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
 
       // Step 2: load all dashboard data in parallel
       const [
-        { data: staffRows,        error: staffErr },
-        { data: contractRows,     error: contractErr },
+        { data: staffRows,            error: staffErr },
+        { data: contractRows,         error: contractErr },
         { data: siteRows },
+        { data: projectSiteLinkRows },
         { data: activityTypeRows },
         { data: activityRows },
         { data: carryoverRows },
@@ -291,10 +298,13 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           .eq('clients.organization_id', oid),
         supabase
           .from('sites')
-          .select('*')
+          .select('id, name, notes, active, sort_order')
           .eq('organization_id', oid)
-          .not('project_id', 'is', null)
-          .order('sort_order'),
+          .order('name'),
+        supabase
+          .from('project_site_links')
+          .select('project_id, site_id, sort_order')
+          .eq('organization_id', oid),
         supabase
           .from('activity_types')
           .select('*')
@@ -354,9 +364,10 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       setState({
         employees:         allStaff.filter(r => r.active !== false && r.deleted !== true).map(rowToEmployee),
         archivedEmployees: allStaff.filter(r => r.active === false && r.deleted !== true).map(rowToEmployee),
-        projects:          (contractRows     ?? []).map(r => rowToProject(r     as Record<string, unknown>)),
-        sites:             (siteRows         ?? []).map(r => rowToSite(r        as Record<string, unknown>)),
-        activityTypes:     (activityTypeRows ?? []).map(r => rowToActivityType(r as Record<string, unknown>)),
+        projects:          (contractRows         ?? []).map(r => rowToProject(r         as Record<string, unknown>)),
+        sites:             (siteRows             ?? []).map(r => rowToSite(r            as Record<string, unknown>)),
+        projectSiteLinks:  (projectSiteLinkRows  ?? []).map(r => rowToProjectSiteLink(r as Record<string, unknown>)),
+        activityTypes:     (activityTypeRows     ?? []).map(r => rowToActivityType(r    as Record<string, unknown>)),
         activities:        (activityRows     ?? []).map(r => rowToActivity(r    as Record<string, unknown>)),
         carryovers:        (carryoverRows    ?? []).map(r => rowToCarryover(r   as Record<string, unknown>)),
         skills:            (skillRows        ?? []).map(r => (r as Record<string, unknown>).name as string),
@@ -462,9 +473,9 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
     function deleteProject(id: string) {
       setState(prev => ({
         ...prev,
-        projects:   prev.projects.filter(p => p.id !== id),
-        sites:      prev.sites.filter(s => s.projectId !== id),
-        activities: prev.activities.filter(a => a.projectId !== id),
+        projects:         prev.projects.filter(p => p.id !== id),
+        projectSiteLinks: prev.projectSiteLinks.filter(l => l.projectId !== id),
+        activities:       prev.activities.filter(a => a.projectId !== id),
       }))
       db.from('client_contracts')
         .delete()
@@ -474,37 +485,73 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
 
     // ── Sites ──────────────────────────────────────────────────
 
-    async function addSite(s: Omit<Site, 'id'>) {
-      const tempId = 'temp-' + Date.now()
-      const optimistic: Site = { id: tempId, ...s }
-      setState(prev => ({ ...prev, sites: [...prev.sites, optimistic] }))
-
+    async function createAndLinkSite(projectId: string, name: string, notes?: string) {
       const { orgId: oid } = ref()
+      const tempSiteId = 'temp-' + Date.now()
+      const optimisticSite: Site = { id: tempSiteId, name, notes, active: true, sortOrder: 0 }
+      const optimisticLink: ProjectSiteLink = { projectId, siteId: tempSiteId, sortOrder: 0 }
+      setState(prev => ({
+        ...prev,
+        sites: [...prev.sites, optimisticSite].sort((a, b) => a.name.localeCompare(b.name)),
+        projectSiteLinks: [...prev.projectSiteLinks, optimisticLink],
+      }))
+
       const { data: inserted, error } = await db
         .from('sites')
-        .insert({
-          organization_id: oid,
-          project_id:      s.projectId,
-          name:            s.name,
-          address:         s.address ?? null,
-          notes:           s.notes ?? null,
-          active:          s.active,
-          sort_order:      s.sortOrder,
-        })
+        .insert({ organization_id: oid, name, notes: notes ?? null, active: true, sort_order: 0 })
         .select('id')
         .single()
 
       if (error || !inserted) {
-        console.error('addSite:', error)
-        setState(prev => ({ ...prev, sites: prev.sites.filter(x => x.id !== tempId) }))
+        console.error('createAndLinkSite:', error)
+        setState(prev => ({
+          ...prev,
+          sites: prev.sites.filter(s => s.id !== tempSiteId),
+          projectSiteLinks: prev.projectSiteLinks.filter(l => l.siteId !== tempSiteId),
+        }))
         return
       }
 
-      const realId = (inserted as Record<string, unknown>).id as string
+      const realSiteId = (inserted as Record<string, unknown>).id as string
       setState(prev => ({
         ...prev,
-        sites: prev.sites.map(x => x.id === tempId ? { ...x, id: realId } : x),
+        sites: prev.sites.map(s => s.id === tempSiteId ? { ...s, id: realSiteId } : s),
+        projectSiteLinks: prev.projectSiteLinks.map(l =>
+          l.siteId === tempSiteId ? { ...l, siteId: realSiteId } : l
+        ),
       }))
+
+      db.from('project_site_links')
+        .insert({ organization_id: oid, project_id: projectId, site_id: realSiteId, sort_order: 0 })
+        .then(({ error: le }) => { if (le) console.error('createAndLinkSite (link):', le) })
+    }
+
+    function linkSite(projectId: string, siteId: string) {
+      const { orgId: oid } = ref()
+      setState(prev => ({
+        ...prev,
+        projectSiteLinks: [...prev.projectSiteLinks, { projectId, siteId, sortOrder: 0 }],
+      }))
+      db.from('project_site_links')
+        .insert({ organization_id: oid, project_id: projectId, site_id: siteId, sort_order: 0 })
+        .then(({ error }) => { if (error) console.error('linkSite:', error) })
+    }
+
+    function unlinkSite(projectId: string, siteId: string) {
+      setState(prev => ({
+        ...prev,
+        projectSiteLinks: prev.projectSiteLinks.filter(
+          l => !(l.projectId === projectId && l.siteId === siteId)
+        ),
+        activities: prev.activities.map(a =>
+          a.projectId === projectId && a.siteId === siteId ? { ...a, siteId: undefined } : a
+        ),
+      }))
+      db.from('project_site_links')
+        .delete()
+        .eq('project_id', projectId)
+        .eq('site_id', siteId)
+        .then(({ error }) => { if (error) console.error('unlinkSite:', error) })
     }
 
     function updateSite(id: string, patch: Partial<Site>) {
@@ -516,18 +563,6 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .update(sitePatch(patch))
         .eq('id', id)
         .then(({ error }) => { if (error) console.error('updateSite:', error) })
-    }
-
-    function deleteSite(id: string) {
-      setState(prev => ({
-        ...prev,
-        sites:      prev.sites.filter(s => s.id !== id),
-        activities: prev.activities.map(a => a.siteId === id ? { ...a, siteId: undefined } : a),
-      }))
-      db.from('sites')
-        .delete()
-        .eq('id', id)
-        .then(({ error }) => { if (error) console.error('deleteSite:', error) })
     }
 
     // ── Activities ─────────────────────────────────────────────
@@ -983,9 +1018,10 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       updateProject,
       addProject,
       deleteProject,
-      addSite,
+      createAndLinkSite,
+      linkSite,
+      unlinkSite,
       updateSite,
-      deleteSite,
       addActivity,
       updateActivity,
       deleteActivity,
