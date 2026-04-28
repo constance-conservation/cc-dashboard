@@ -627,14 +627,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       }))
 
       const { error: le } = await db.from('project_site_links')
-        .insert({ organization_id: oid, project_id: projectId, site_id: realSiteId, sort_order: 0 })
-      if (le) {
-        console.error('createAndLinkSite (link):', le)
-        setState(prev => ({
-          ...prev,
-          projectSiteLinks: prev.projectSiteLinks.filter(l => l.siteId !== realSiteId),
-        }))
-      }
+        .upsert({ organization_id: oid, project_id: projectId, site_id: realSiteId, sort_order: 0 }, { onConflict: 'project_id,site_id' })
+      if (le) console.error('createAndLinkSite (link):', le)
 
       return realSiteId
     }
@@ -646,14 +640,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         projectSiteLinks: [...prev.projectSiteLinks, { projectId, siteId, sortOrder: 0 }],
       }))
       const { error } = await db.from('project_site_links')
-        .insert({ organization_id: oid, project_id: projectId, site_id: siteId, sort_order: 0 })
-      if (error) {
-        console.error('linkSite:', error)
-        setState(prev => ({
-          ...prev,
-          projectSiteLinks: prev.projectSiteLinks.filter(l => !(l.projectId === projectId && l.siteId === siteId)),
-        }))
-      }
+        .upsert({ organization_id: oid, project_id: projectId, site_id: siteId, sort_order: 0 }, { onConflict: 'project_id,site_id' })
+      if (error) console.error('linkSite:', error)
     }
 
     function unlinkSite(projectId: string, siteId: string) {
