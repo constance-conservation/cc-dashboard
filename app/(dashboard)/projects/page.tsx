@@ -265,10 +265,10 @@ function ActivityTypeahead({ value, displayName, activityTypes, onChange, onAddN
 
 type ActivityFormState = Omit<Activity, 'id'>
 
-function emptyActivity(projectId: string): ActivityFormState {
+function emptyActivity(projectId: string, defaultSiteId?: string, start = '', end = ''): ActivityFormState {
   return {
     projectId,
-    siteId: undefined,
+    siteId: defaultSiteId,
     activityTypeId: undefined,
     name: '',
     allocationStrategy: 'even',
@@ -284,8 +284,8 @@ function emptyActivity(projectId: string): ActivityFormState {
     skills: [],
     priority: 'medium',
     status: 'active',
-    start: '',
-    end: '',
+    start,
+    end,
     notes: undefined,
     sortOrder: 0,
   }
@@ -298,7 +298,13 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
   onClose: () => void
 }) {
   const existing = activityId ? state.activities.find(a => a.id === activityId) : null
-  const [form, setForm] = useState<ActivityFormState>(existing ? { ...existing } : emptyActivity(projectId))
+  const project = state.projects.find(x => x.id === projectId)
+  const sites = projectSites(state, projectId)
+  const siteOptions = sites.map(s => ({ value: s.id, label: s.name }))
+
+  const [form, setForm] = useState<ActivityFormState>(() =>
+    existing ? { ...existing } : emptyActivity(projectId, sites[0]?.id, project?.start ?? '', project?.end ?? '')
+  )
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [pendingTypeName, setPendingTypeName] = useState<string | null>(null)
   const [customAllocs, setCustomAllocs] = useState<Record<string, number>>(() => {
@@ -317,11 +323,14 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
     }
   }, [state.activityTypes, pendingTypeName])
 
-  const sites = projectSites(state, projectId)
-  const siteOptions = sites.map(s => ({ value: s.id, label: s.name }))
+  const canSave = !!(
+    (form.name.trim() || form.activityTypeId) &&
+    (sites.length === 0 || form.siteId) &&
+    form.totalAllocation > 0
+  )
 
   const save = async () => {
-    if (!form.name.trim() && !form.activityTypeId) return
+    if (!canSave) return
     if (existing) {
       state.updateActivity(existing.id, form)
       if (form.allocationStrategy === 'custom') {
@@ -354,6 +363,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
         onSave={save}
         onDelete={existing ? () => setConfirmDelete(true) : undefined}
         saveLabel={existing ? 'Save' : 'Add activity'}
+        saveDisabled={!canSave}
       >
         <Field label="Activity">
           <ActivityTypeahead
@@ -388,17 +398,6 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
         </Field>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <Field label="Start date">
-            <input className="input" type="date" value={form.start}
-              onChange={e => setForm({ ...form, start: e.target.value })} />
-          </Field>
-          <Field label="End date">
-            <input className="input" type="date" value={form.end}
-              onChange={e => setForm({ ...form, end: e.target.value })} />
-          </Field>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Field label="Work unit">
             <Select value={form.unit}
               onChange={v => setForm({ ...form, unit: v as WorkUnit })}
@@ -422,7 +421,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
         </Field>
 
         {form.allocationStrategy === 'custom' && (
-          <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: 4 }}>
+          <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: 4, marginBottom: 10 }}>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
               Monthly allocation
             </div>
@@ -707,7 +706,7 @@ function ProjectDrawer({ projectId, state, onClose }: {
               const group = site
                 ? activities.filter(a => a.siteId === site.id)
                 : activities.filter(a => !a.siteId)
-              if (group.length === 0 && site !== null) return null
+              if (group.length === 0) return null
 
               return (
                 <div key={site?.id ?? 'project-wide'} style={{ marginBottom: 18 }}>
@@ -777,8 +776,6 @@ type PendingActivity = {
   overtimeFlag: boolean
   overtimeRate: number
   skills: string[]
-  start: string
-  end: string
   notes?: string
 }
 
@@ -805,7 +802,7 @@ function AddProjectModal({ state, onClose }: {
     name: '', activityTypeId: undefined, siteKey: '', priority: 'medium', unit: 'days',
     allocationStrategy: 'even', totalAllocation: 0, customAllocs: {}, crewSizeType: 'fixed',
     minCrew: 1, maxCrew: undefined, chargeOutRate: 0,
-    overtimeFlag: false, overtimeRate: 1.5, skills: [], start: '', end: '',
+    overtimeFlag: false, overtimeRate: 1.5, skills: [],
     notes: undefined,
   })
 
@@ -895,13 +892,13 @@ function AddProjectModal({ state, onClose }: {
         skills: act.skills,
         priority: act.priority,
         status: 'active',
-        start: act.start,
-        end: act.end,
+        start: p.start,
+        end: p.end,
         notes: act.notes,
         sortOrder: 0,
       })
       if (activityId && act.allocationStrategy === 'custom') {
-        const months = monthsBetween(act.start, act.end)
+        const months = monthsBetween(p.start, p.end)
         const periods = months.map(m => ({ period: m, allocation: act.customAllocs[m] ?? 0 }))
         await state.setActivityAllocations(activityId, periods)
       }
@@ -1057,7 +1054,6 @@ function AddProjectModal({ state, onClose }: {
                         : state.sites.find(s => s.id === a.siteKey)?.name}
                     </span>
                   )}
-                  {a.start && a.end ? ` · ${a.start} → ${a.end}` : ''}
                 </div>
               </div>
               <span className={`pill${a.priority === 'high' ? ' accent' : ''}`} style={{ fontSize: 10 }}>
@@ -1105,16 +1101,6 @@ function AddProjectModal({ state, onClose }: {
                     options={PRIORITY_OPTIONS} />
                 </Field>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <Field label="Start date">
-                    <input className="input" type="date" value={a.start}
-                      onChange={e => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, start: e.target.value } : x))} />
-                  </Field>
-                  <Field label="End date">
-                    <input className="input" type="date" value={a.end}
-                      onChange={e => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, end: e.target.value } : x))} />
-                  </Field>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <Field label="Work unit">
                     <Select value={a.unit}
                       onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, unit: v as WorkUnit } : x))}
@@ -1141,10 +1127,10 @@ function AddProjectModal({ state, onClose }: {
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
                       Monthly allocation
                     </div>
-                    {!a.start || !a.end ? (
-                      <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>Set start and end dates to configure monthly allocation</div>
+                    {!p.start || !p.end ? (
+                      <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>Set project start and end dates to configure monthly allocation</div>
                     ) : (() => {
-                      const months = monthsBetween(a.start, a.end)
+                      const months = monthsBetween(p.start, p.end)
                       const allocs = a.customAllocs ?? {}
                       const total = months.reduce((s, m) => s + (allocs[m] ?? 0), 0)
                       return (
@@ -1245,16 +1231,6 @@ function AddProjectModal({ state, onClose }: {
                 options={PRIORITY_OPTIONS} />
             </Field>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <Field label="Start date">
-                <input className="input" type="date" value={activityForm.start}
-                  onChange={e => setActivityForm({ ...activityForm, start: e.target.value })} />
-              </Field>
-              <Field label="End date">
-                <input className="input" type="date" value={activityForm.end}
-                  onChange={e => setActivityForm({ ...activityForm, end: e.target.value })} />
-              </Field>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <Field label="Work unit">
                 <Select value={activityForm.unit}
                   onChange={v => setActivityForm({ ...activityForm, unit: v as WorkUnit })}
@@ -1281,10 +1257,10 @@ function AddProjectModal({ state, onClose }: {
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
                   Monthly allocation
                 </div>
-                {!activityForm.start || !activityForm.end ? (
-                  <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>Set start and end dates to configure monthly allocation</div>
+                {!p.start || !p.end ? (
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>Set project start and end dates to configure monthly allocation</div>
                 ) : (() => {
-                  const months = monthsBetween(activityForm.start, activityForm.end)
+                  const months = monthsBetween(p.start, p.end)
                   const total = months.reduce((s, m) => s + (activityForm.customAllocs[m] ?? 0), 0)
                   return (
                     <>
@@ -1338,12 +1314,11 @@ function AddProjectModal({ state, onClose }: {
             </Field>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn primary" type="button"
-                disabled={!activityForm.name.trim() || !activityForm.siteKey}
+                disabled={!activityForm.name.trim() || !activityForm.siteKey || activityForm.totalAllocation <= 0}
                 onClick={() => {
-                  if (!activityForm.name.trim()) return
-                  if (!activityForm.siteKey) return
+                  if (!activityForm.name.trim() || !activityForm.siteKey || activityForm.totalAllocation <= 0) return
                   setPendingActivities(prev => [...prev, { ...activityForm }])
-                  setActivityForm({ name: '', activityTypeId: undefined, siteKey: '', priority: 'medium', unit: 'days', allocationStrategy: 'even', totalAllocation: 0, customAllocs: {}, crewSizeType: 'fixed', minCrew: 1, maxCrew: undefined, chargeOutRate: 0, overtimeFlag: false, overtimeRate: 1.5, skills: [], start: '', end: '', notes: undefined })
+                  setActivityForm({ name: '', activityTypeId: undefined, siteKey: '', priority: 'medium', unit: 'days', allocationStrategy: 'even', totalAllocation: 0, customAllocs: {}, crewSizeType: 'fixed', minCrew: 1, maxCrew: undefined, chargeOutRate: 0, overtimeFlag: false, overtimeRate: 1.5, skills: [], notes: undefined })
                   setShowActivityForm(false)
                 }}>
                 Add activity
@@ -1354,14 +1329,13 @@ function AddProjectModal({ state, onClose }: {
         ) : (
           <>
             <button className="btn" type="button"
-              disabled={selectedSiteIds.length + pendingSiteNames.length === 0}
+              disabled={selectedSiteIds.length + pendingSiteNames.length === 0 || !p.start || !p.end}
               onClick={() => setShowActivityForm(true)}>
               <Icon name="plus" size={14} /> Add activity
             </button>
-            {selectedSiteIds.length + pendingSiteNames.length === 0 && selectedClientId && (
-              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>
-                Add at least one site above before adding activities
-              </div>
+            {selectedClientId && (selectedSiteIds.length + pendingSiteNames.length === 0
+              ? <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>Add at least one site above before adding activities</div>
+              : (!p.start || !p.end) && <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>Set project start and end dates before adding activities</div>
             )}
           </>
         )}
