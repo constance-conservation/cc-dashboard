@@ -1240,19 +1240,43 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       const { clients, archivedClients } = ref()
       const client = [...clients, ...archivedClients].find(c => c.id === id)
       const clientName = client?.name ?? ''
+      const linkedProjectIds = ref().projects.filter(p => p.client === clientName).map(p => p.id)
       setState(prev => ({
         ...prev,
-        clients:         prev.clients.filter(c => c.id !== id),
-        archivedClients: prev.archivedClients.filter(c => c.id !== id),
-        projects:        prev.projects.map(p =>
-          p.client === clientName ? { ...p, client: '' } : p
-        ),
+        clients:          prev.clients.filter(c => c.id !== id),
+        archivedClients:  prev.archivedClients.filter(c => c.id !== id),
+        projects:         prev.projects.filter(p => p.client !== clientName),
+        projectSiteLinks: prev.projectSiteLinks.filter(l => !linkedProjectIds.includes(l.projectId)),
+        activities:       prev.activities.filter(a => !linkedProjectIds.includes(a.projectId)),
+        sites:            prev.sites.filter(s => s.clientId !== id),
       }))
-      const { error: unlinkErr } = await db
-        .from('client_contracts')
-        .update({ client_id: null })
+      if (linkedProjectIds.length > 0) {
+        const { error: raErr } = await db
+          .from('roster_assignments')
+          .delete()
+          .in('contract_id', linkedProjectIds)
+        if (raErr) console.error('deleteClient (roster_assignments):', raErr)
+        const { error: actErr } = await db
+          .from('activities')
+          .delete()
+          .in('project_id', linkedProjectIds)
+        if (actErr) console.error('deleteClient (activities):', actErr)
+        const { error: pslErr } = await db
+          .from('project_site_links')
+          .delete()
+          .in('project_id', linkedProjectIds)
+        if (pslErr) console.error('deleteClient (project_site_links):', pslErr)
+        const { error: ccErr } = await db
+          .from('client_contracts')
+          .delete()
+          .in('id', linkedProjectIds)
+        if (ccErr) console.error('deleteClient (client_contracts):', ccErr)
+      }
+      const { error: sitesErr } = await db
+        .from('sites')
+        .delete()
         .eq('client_id', id)
-      if (unlinkErr) console.error('deleteClient (unlink contracts):', unlinkErr)
+      if (sitesErr) console.error('deleteClient (sites):', sitesErr)
       const { error } = await db
         .from('clients')
         .delete()

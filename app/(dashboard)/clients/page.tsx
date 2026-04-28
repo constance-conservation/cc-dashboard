@@ -117,6 +117,8 @@ function ClientDrawer({ clientId, state, onClose }: {
   const [siteError, setSiteError] = useState<string | null>(null)
   const [confirmDeleteSiteId, setConfirmDeleteSiteId] = useState<string | null>(null)
   const [editSiteId, setEditSiteId] = useState<string | null>(null)
+  const [editSiteName, setEditSiteName] = useState('')
+  const [editSiteNotes, setEditSiteNotes] = useState('')
 
   const linkedProjects = state.projects.filter(p => p.client === client.name)
   const hasProjects = linkedProjects.length > 0
@@ -148,7 +150,7 @@ function ClientDrawer({ clientId, state, onClose }: {
         <ConfirmDialog
           title={`Delete "${client.name}"?`}
           message={hasProjects
-            ? `This will permanently remove the client. This cannot be undone.\n\nThis client has linked projects — they will be unlinked but not deleted.`
+            ? `This will permanently delete the client AND all ${linkedProjects.length} linked project${linkedProjects.length !== 1 ? 's' : ''} and their activities. This cannot be undone.\n\nTo keep these projects, reassign them to another client first.`
             : 'This will permanently remove the client. This cannot be undone.'}
           confirmLabel="Delete client"
           danger
@@ -236,25 +238,27 @@ function ClientDrawer({ clientId, state, onClose }: {
                 No projects linked
               </div>
             ) : linkedProjects.map(p => (
-              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--line)' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>
-                    {p.name}
-                    {p.projectNumber && (
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', marginLeft: 6 }}>{p.projectNumber}</span>
-                    )}
+              <Link key={p.id} href={`/projects?open=${p.id}`} onClick={onClose} style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--line)' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>
+                      {p.name}
+                      {p.projectNumber && (
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', marginLeft: 6 }}>{p.projectNumber}</span>
+                      )}
+                    </div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', marginTop: 2 }}>
+                      {p.start || '—'} → {p.end || '—'}
+                    </div>
                   </div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', marginTop: 2 }}>
-                    {p.start || '—'} → {p.end || '—'}
-                  </div>
+                  <span className={`pill${p.priority === 'high' ? ' accent' : ''}`} style={{ fontSize: 10 }}>
+                    <span className="dot" />{p.priority}
+                  </span>
+                  {p.archived && (
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)' }}>archived</span>
+                  )}
                 </div>
-                <span className={`pill${p.priority === 'high' ? ' accent' : ''}`} style={{ fontSize: 10 }}>
-                  <span className="dot" />{p.priority}
-                </span>
-                {p.archived && (
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)' }}>archived</span>
-                )}
-              </div>
+              </Link>
             ))}
           </>
         )}
@@ -300,15 +304,26 @@ function ClientDrawer({ clientId, state, onClose }: {
                 <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
                   <div style={{ flex: 1 }}>
                     {editSiteId === s.id ? (
-                      <input className="input" defaultValue={s.name}
-                        onBlur={e => { state.updateSite(s.id, { name: e.target.value.trim() || s.name }); setEditSiteId(null) }}
-                        autoFocus style={{ width: '100%' }} />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <input className="input" value={editSiteName}
+                          onChange={e => setEditSiteName(e.target.value)}
+                          onBlur={() => state.updateSite(s.id, { name: editSiteName.trim() || s.name, notes: editSiteNotes.trim() || undefined })}
+                          autoFocus style={{ width: '100%' }} />
+                        <input className="input" value={editSiteNotes}
+                          onChange={e => setEditSiteNotes(e.target.value)}
+                          placeholder="Notes (optional)"
+                          style={{ width: '100%' }} />
+                        <button className="btn" style={{ alignSelf: 'flex-start', marginTop: 2 }}
+                          onClick={() => { state.updateSite(s.id, { name: editSiteName.trim() || s.name, notes: editSiteNotes.trim() || undefined }); setEditSiteId(null) }}>
+                          Done
+                        </button>
+                      </div>
                     ) : (
-                      <div style={{ fontSize: 13, fontWeight: 500, cursor: 'text' }} onClick={() => setEditSiteId(s.id)}>
+                      <div style={{ fontSize: 13, fontWeight: 500 }} onClick={() => { setEditSiteId(s.id); setEditSiteName(s.name); setEditSiteNotes(s.notes ?? '') }}>
                         {s.name}
                       </div>
                     )}
-                    {s.notes && (
+                    {editSiteId !== s.id && s.notes && (
                       <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
                         {s.notes.length > 60 ? s.notes.slice(0, 60) + '…' : s.notes}
                       </div>
@@ -320,7 +335,7 @@ function ClientDrawer({ clientId, state, onClose }: {
                     </span>
                   )}
                   <div style={{ display: 'flex', gap: 4 }}>
-                    <button className="iconbtn" onClick={() => setEditSiteId(s.id)}>
+                    <button className="iconbtn" onClick={() => { setEditSiteId(s.id); setEditSiteName(s.name); setEditSiteNotes(s.notes ?? '') }}>
                       <Icon name="edit" size={12} />
                     </button>
                     <button className="iconbtn"
