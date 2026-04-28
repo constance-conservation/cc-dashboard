@@ -257,7 +257,7 @@ export default function EmployeesPage() {
   const [showSkills, setShowSkills] = useState(false)
   const [showRoles, setShowRoles] = useState(false)
   const [filter, setFilter] = useState('')
-  const [showArchived, setShowArchived] = useState(false)
+  const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active')
 
   const visible = state.employees.filter(e =>
     !filter || e.name.toLowerCase().includes(filter.toLowerCase()) || e.role.toLowerCase().includes(filter.toLowerCase())
@@ -271,48 +271,46 @@ export default function EmployeesPage() {
       <div className="subpage-top">
         <Link href="/" className="back-btn"><Icon name="back" size={16} /> Dashboard</Link>
         <div style={{ width: 1, height: 20, background: 'var(--line)' }} />
-        <span className="sp-crumb">{state.employees.length} active · {state.skills.length} skills tracked</span>
+        <span className="sp-crumb">{activeTab === 'active' ? `${state.employees.length} active · ${state.skills.length} skills tracked` : `${state.archivedEmployees.length} archived`}</span>
         <div style={{ flex: 1 }} />
         <h2 className="sp-title">Employees</h2>
       </div>
 
       <div className="subpage-body">
         <div style={{ display: 'flex', gap: 10, marginBottom: 18, alignItems: 'center' }}>
-          <button className="btn primary" onClick={() => setShowAdd(true)}><Icon name="plus" size={14} /> New employee</button>
+          {activeTab === 'active' && <button className="btn primary" onClick={() => setShowAdd(true)}><Icon name="plus" size={14} /> New employee</button>}
           <button className="btn" onClick={() => setShowSkills(true)}>Manage skills ({state.skills.length})</button>
           <button className="btn" onClick={() => setShowRoles(true)}>Manage roles ({state.roles.length})</button>
+          <button style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' as const, letterSpacing: '0.05em', background: activeTab === 'active' ? 'var(--accent-soft)' : 'transparent', color: activeTab === 'active' ? 'var(--accent)' : 'var(--ink-3)', border: '1px solid ' + (activeTab === 'active' ? 'var(--accent)' : 'transparent') }} onClick={() => setActiveTab('active')}>Active</button>
+          <button style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' as const, letterSpacing: '0.05em', background: activeTab === 'archived' ? 'var(--accent-soft)' : 'transparent', color: activeTab === 'archived' ? 'var(--accent)' : 'var(--ink-3)', border: '1px solid ' + (activeTab === 'archived' ? 'var(--accent)' : 'transparent') }} onClick={() => setActiveTab('archived')}>Archived</button>
           <div style={{ flex: 1 }} />
           <input className="input" placeholder="Search name or role…" value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 260 }} />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-          {visible.map(emp => (
-            <EmployeeCard key={emp.id} emp={emp} onOpen={() => setSelected(emp.id)} />
-          ))}
-        </div>
-
-        {state.archivedEmployees.length > 0 && (
-          <div style={{ marginTop: 32 }}>
-            <button
-              onClick={() => setShowArchived(v => !v)}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', padding: '8px 0', color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}
-            >
-              <Icon name="archive" size={14} />
-              Archived ({state.archivedEmployees.length})
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ transform: showArchived ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }}>
-                <path d="M2 3l3 4 3-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
-            {showArchived && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12, marginTop: 12 }}>
-                {visibleArchived.map(emp => (
-                  <EmployeeCard
-                    key={emp.id}
-                    emp={emp}
-                    onOpen={() => setSelected(emp.id)}
-                    onUnarchive={() => state.unarchiveEmployee(emp.id)}
-                  />
-                ))}
+        {activeTab === 'active' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
+            {visible.map(emp => (
+              <EmployeeCard key={emp.id} emp={emp} onOpen={() => setSelected(emp.id)} />
+            ))}
+            {visible.length === 0 && (
+              <div style={{ color: 'var(--ink-3)', fontSize: 12, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                No employees match
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
+            {visibleArchived.map(emp => (
+              <EmployeeCard
+                key={emp.id}
+                emp={emp}
+                onOpen={() => setSelected(emp.id)}
+                onUnarchive={() => state.unarchiveEmployee(emp.id)}
+              />
+            ))}
+            {visibleArchived.length === 0 && (
+              <div style={{ color: 'var(--ink-3)', fontSize: 12, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                No archived employees
               </div>
             )}
           </div>

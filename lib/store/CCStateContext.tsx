@@ -183,6 +183,10 @@ type CCActions = {
   unlinkSite:        (projectId: string, siteId: string) => void
   updateSite:        (id: string, patch: Partial<Site>) => void
   deleteSite:        (siteId: string) => void
+  // Activity Types
+  addActivityType:    (name: string, description?: string) => void
+  updateActivityType: (id: string, patch: { name?: string; description?: string }) => void
+  deleteActivityType: (id: string) => void
   // Activities
   addActivity:      (a: Omit<Activity, 'id'>) => void
   updateActivity:   (id: string, patch: Partial<Activity>) => void
@@ -598,6 +602,55 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .delete()
         .eq('id', siteId)
         .then(({ error }) => { if (error) console.error('deleteSite:', error) })
+    }
+
+    // ── Activity Types ─────────────────────────────────────────
+
+    async function addActivityType(name: string, description?: string) {
+      const { orgId: oid } = ref()
+      const tempId = 'temp-' + Date.now()
+      const optimistic: ActivityType = { id: tempId, name, description }
+      setState(prev => ({ ...prev, activityTypes: [...prev.activityTypes, optimistic].sort((a, b) => a.name.localeCompare(b.name)) }))
+      const { data: inserted, error } = await db
+        .from('activity_types')
+        .insert({ organization_id: oid, name, description: description ?? null })
+        .select('id')
+        .single()
+      if (error || !inserted) {
+        console.error('addActivityType:', error)
+        setState(prev => ({ ...prev, activityTypes: prev.activityTypes.filter(t => t.id !== tempId) }))
+        return
+      }
+      const realId = (inserted as Record<string, unknown>).id as string
+      setState(prev => ({
+        ...prev,
+        activityTypes: prev.activityTypes.map(t => t.id === tempId ? { ...t, id: realId } : t),
+      }))
+    }
+
+    function updateActivityType(id: string, patch: { name?: string; description?: string }) {
+      setState(prev => ({
+        ...prev,
+        activityTypes: prev.activityTypes.map(t => t.id === id ? { ...t, ...patch } : t),
+      }))
+      const row: Record<string, unknown> = {}
+      if (patch.name !== undefined) row.name = patch.name
+      if (patch.description !== undefined) row.description = patch.description ?? null
+      db.from('activity_types')
+        .update(row)
+        .eq('id', id)
+        .then(({ error }) => { if (error) console.error('updateActivityType:', error) })
+    }
+
+    function deleteActivityType(id: string) {
+      setState(prev => ({
+        ...prev,
+        activityTypes: prev.activityTypes.filter(t => t.id !== id),
+      }))
+      db.from('activity_types')
+        .delete()
+        .eq('id', id)
+        .then(({ error }) => { if (error) console.error('deleteActivityType:', error) })
     }
 
     // ── Activities ─────────────────────────────────────────────
@@ -1060,6 +1113,9 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       unlinkSite,
       updateSite,
       deleteSite,
+      addActivityType,
+      updateActivityType,
+      deleteActivityType,
       addActivity,
       updateActivity,
       deleteActivity,
