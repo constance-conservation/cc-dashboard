@@ -553,13 +553,13 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
 
         {form.crewSizeType === 'range' ? (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <Field label="Minimum">
-              <NumericInput className="input" value={form.minCrew}
-                onChange={v => setForm({ ...form, minCrew: v })} min={1} />
-            </Field>
             <Field label="Target">
               <NumericInput className="input" value={form.maxCrew ?? 0}
                 onChange={v => setForm({ ...form, maxCrew: v || undefined })} min={form.minCrew} />
+            </Field>
+            <Field label="Minimum">
+              <NumericInput className="input" value={form.minCrew}
+                onChange={v => setForm({ ...form, minCrew: v })} min={1} />
             </Field>
           </div>
         ) : (
@@ -1464,24 +1464,26 @@ function ActivityTypesModal({ state, onClose }: {
 
           <div className="drawer-body">
             {/* Add new */}
-            <form onSubmit={addNew} style={{ display: 'flex', gap: 8, marginBottom: 20, alignItems: 'flex-end' }}>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <form onSubmit={addNew} style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <label style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)' }}>
                   Name
                 </label>
                 <input className="input" placeholder="e.g. Mechanical Mulching" value={newName}
                   onChange={e => setNewName(e.target.value)} />
               </div>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <label style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)' }}>
                   Description (optional)
                 </label>
                 <input className="input" placeholder="Brief description…" value={newDesc}
                   onChange={e => setNewDesc(e.target.value)} />
               </div>
-              <button type="submit" className="btn primary" style={{ flexShrink: 0 }}>
-                <Icon name="plus" size={12} /> Add
-              </button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button type="submit" className="btn primary" style={{ flexShrink: 0 }}>
+                  <Icon name="plus" size={12} /> Add
+                </button>
+              </div>
             </form>
 
             {/* List */}
@@ -1494,16 +1496,13 @@ function ActivityTypesModal({ state, onClose }: {
                 {state.activityTypes.map(t => (
                   <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--bg-sunken)', borderRadius: 8 }}>
                     {editId === t.id ? (
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                          <input className="input" value={editName} onChange={e => setEditName(e.target.value)}
-                            onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditId(null) }}
-                            autoFocus style={{ flex: 1 }} />
-                          <input className="input" value={editDesc} onChange={e => setEditDesc(e.target.value)}
-                            placeholder="Description…"
-                            onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditId(null) }}
-                            style={{ flex: 1 }} />
-                        </div>
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <input className="input" value={editName} onChange={e => setEditName(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditId(null) }}
+                          autoFocus placeholder="Name" />
+                        <input className="input" value={editDesc} onChange={e => setEditDesc(e.target.value)}
+                          placeholder="Description…"
+                          onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditId(null) }} />
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                           <button className="btn primary" onClick={commitEdit} style={{ fontSize: 12, padding: '5px 10px' }}>Save</button>
                           <button className="btn" onClick={() => setEditId(null)} style={{ fontSize: 12, padding: '5px 10px' }}>Cancel</button>
