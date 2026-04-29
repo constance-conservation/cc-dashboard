@@ -421,14 +421,17 @@ function emptyActivity(projectId: string, defaultSiteId?: string, start = '', en
   }
 }
 
-function ActivityDrawer({ projectId, activityId, state, onClose }: {
+function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
   projectId: string
   activityId: string | null
   state: ReturnType<typeof useCCState>
   onClose: () => void
+  onNavigate?: (id: string) => void
 }) {
   const existing = activityId ? state.activities.find(a => a.id === activityId) : null
   const project = state.projects.find(x => x.id === projectId)
+  const projectActivities = state.activities.filter(a => a.projectId === projectId)
+  const currentIdx = activityId ? projectActivities.findIndex(a => a.id === activityId) : -1
   const sites = projectSites(state, projectId)
   const siteOptions = sites.map(s => ({ value: s.id, label: s.name }))
 
@@ -493,7 +496,26 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
       )}
       <Drawer
         title={existing ? existing.name : 'New activity'}
-        subtitle={existing ? 'Edit activity' : 'Add to project'}
+        subtitle={existing && onNavigate ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Edit activity</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <button className="iconbtn" disabled={currentIdx <= 0}
+                onClick={() => onNavigate(projectActivities[currentIdx - 1].id)}
+                style={{ opacity: currentIdx <= 0 ? 0.3 : 1 }}>
+                <Icon name="back" size={13} />
+              </button>
+              <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', minWidth: 40, textAlign: 'center' }}>
+                {currentIdx + 1} / {projectActivities.length}
+              </span>
+              <button className="iconbtn" disabled={currentIdx >= projectActivities.length - 1}
+                onClick={() => onNavigate(projectActivities[currentIdx + 1].id)}
+                style={{ opacity: currentIdx >= projectActivities.length - 1 ? 0.3 : 1, transform: 'rotate(180deg)' }}>
+                <Icon name="back" size={13} />
+              </button>
+            </div>
+          </div>
+        ) : existing ? 'Edit activity' : 'Add to project'}
         onClose={onClose}
         onSave={save}
         onDelete={existing ? () => setConfirmDelete(true) : undefined}
@@ -705,6 +727,7 @@ function ProjectDrawer({ projectId, state, onClose }: {
         onDelete={tab === 'details' ? () => setConfirmDeleteProject(true) : undefined}
         onArchive={tab === 'details' && !p.archived ? () => { state.archiveProject(p.id); onClose() } : undefined}
         onRestore={tab === 'details' && p.archived ? () => { state.restoreProject(p.id); onClose() } : undefined}
+        hideOverlay={editActivityId !== null}
       >
         {/* Tab bar */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 18 }}>
@@ -871,10 +894,12 @@ function ProjectDrawer({ projectId, state, onClose }: {
       </Drawer>
       {editActivityId !== null && (
         <ActivityDrawer
+          key={editActivityId}
           projectId={projectId}
           activityId={editActivityId === 'new' ? null : editActivityId}
           state={state}
           onClose={() => setEditActivityId(null)}
+          onNavigate={id => setEditActivityId(id)}
         />
       )}
     </>
