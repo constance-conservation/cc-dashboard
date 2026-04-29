@@ -31,7 +31,7 @@ Replace the standalone reporting app (`constance-reporting.vercel.app`) with nat
 | **E14** | Global Sites view + sub-nav entry | ✅ Merged 2026-04-29 (`e98d42c`) |
 | **E15b** | Add/delete sites + zones + new client | ✅ Merged 2026-04-29 (`5f332a1`, PR #42) |
 | **E16** | Generation pipeline (full port + tests + Vercel Cron) | ✅ Merged 2026-04-29 (`84bdbec`, PR #43) |
-| **E17** | Sync + webhook (Vercel Cron incremental) | ⏸ Queued — open question on plan still to resolve with Peter |
+| **E17** | Sync + webhook (incremental only — backfill dropped) | ⏸ Queued — brief drafted (round 5), session prompt ready |
 | **E18** | Cutover — flip APPS card href, retire standalone | ⏸ Final brief |
 
 After **E12 + E14**, the entire standalone is fully *viewable* through cc-dashboard.
@@ -190,7 +190,7 @@ covers what the new session needs that isn't in the live tracker
 ## Next session entry point
 
 1. Read this file + `docs/audit/standalone_feature_inventory.md`.
-2. Forward queue is **E17** (sync + webhook) and **E18** (cutover).
-3. **Open question for Peter on E17:** confirm the plan before drafting the brief — Vercel Cron incremental + manual CLI for backfill (default) vs settling the full plan now (where to run backfill, webhook Edge vs Function, etc.).
-4. After E17 lands, **E18** is ~1 hour: flip the APPS card href on cc-dashboard home from `https://constance-reporting.vercel.app/` → `/reporting`, retire standalone Vercel deploy, archive `FrostyFruit1/constance-reporting` repo. Optionally delete `/Users/feelgood/Desktop/CONSTANCE\ CONSERVATION/` legacy dir.
+2. Forward queue: **E17** (round 5 — brief and session prompt are ready at `docs/executor_briefs/E17_sync_webhook.md` and `docs/orchestrator_prompts/E17_session_prompt.md`), then **E18** (round 6, cutover).
+3. **E17 plan settled (2026-04-29):** Backfill explicitly DROPPED from scope. Standalone has been syncing since project inception so historical data is already in Supabase. E17 ports incremental sync (Vercel Cron every 15 min) + webhook (`/api/webhooks/sc/`) only. If a one-shot full re-backfill is ever needed, run the standalone's `npm run sync:backfill` from the local clone at `~/Desktop/constance-reporting/`.
+4. After E17 lands, **E18** is ~1 hour: flip the APPS card href on cc-dashboard home from `https://constance-reporting.vercel.app/` → `/reporting`, **update the registered webhook URL at Safety Culture** to point at cc-dashboard's `/api/webhooks/sc/`, retire standalone Vercel deploy, archive `FrostyFruit1/constance-reporting` repo. Optionally delete `/Users/feelgood/Desktop/CONSTANCE\ CONSERVATION/` legacy dir.
 5. Update this status doc as briefs land.
