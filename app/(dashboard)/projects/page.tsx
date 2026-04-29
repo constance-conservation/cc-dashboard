@@ -774,11 +774,13 @@ function ProjectDrawer({ projectId, state, onClose }: {
               </div>
             )}
 
-            {/* Group activities by site, then project-wide */}
-            {[...sites, null].map(site => {
+            {/* Group activities by site, then project-wide (includes orphaned siteIds) */}
+            {(() => {
+              const linkedSiteIds = new Set(sites.map(s => s.id))
+              return [...sites, null].map(site => {
               const group = site
                 ? activities.filter(a => a.siteId === site.id)
-                : activities.filter(a => !a.siteId)
+                : activities.filter(a => !a.siteId || !linkedSiteIds.has(a.siteId))
               if (group.length === 0) return null
 
               return (
@@ -815,6 +817,7 @@ function ProjectDrawer({ projectId, state, onClose }: {
                   ))}
                 </div>
               )
+            })
             })}
           </>
         )}
