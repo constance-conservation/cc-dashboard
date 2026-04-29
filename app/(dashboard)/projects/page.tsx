@@ -51,7 +51,7 @@ const ALLOCATION_OPTIONS = [
 const CREW_TYPE_OPTIONS = [
   { value: 'fixed', label: 'Fixed' },
   { value: 'range', label: 'Range' },
-  { value: 'any', label: 'Any' },
+  { value: 'any', label: 'Flexible' },
 ]
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Active' },
@@ -61,40 +61,70 @@ const STATUS_OPTIONS = [
 
 // ── SkillsEditor ───────────────────────────────────────────────────────────────
 
-function SkillsEditor({ selected, allSkills, onChange, onAddSkill }: {
+function SkillsDropdown({ selected, allSkills, onChange, onAddSkill }: {
   selected: string[]
   allSkills: string[]
   onChange: (s: string[]) => void
-  onAddSkill: (s: string) => void
+  onAddSkill?: (s: string) => void
 }) {
+  const [open, setOpen] = useState(false)
   const [newSkill, setNewSkill] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    if (open) document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [open])
+
   const toggle = (s: string) => {
-    if (selected.includes(s)) onChange(selected.filter(x => x !== s))
-    else onChange([...selected, s])
+    onChange(selected.includes(s) ? selected.filter(x => x !== s) : [...selected, s])
   }
+
   const addNew = (e: React.FormEvent) => {
     e.preventDefault()
     const s = newSkill.trim()
     if (!s) return
-    onAddSkill(s)
+    onAddSkill?.(s)
     if (!selected.includes(s)) onChange([...selected, s])
     setNewSkill('')
   }
+
   return (
-    <div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-        {allSkills.map(s => (
-          <button key={s} type="button" onClick={() => toggle(s)}
-            className={`skill-chip toggleable${selected.includes(s) ? ' on' : ''}`}>
-            {selected.includes(s) && <Icon name="check" size={10} />} {s}
-          </button>
-        ))}
-      </div>
-      <form onSubmit={addNew} style={{ display: 'flex', gap: 6 }}>
-        <input className="input" placeholder="Add new skill…" value={newSkill}
-          onChange={e => setNewSkill(e.target.value)} style={{ flex: 1 }} />
-        <button type="submit" className="btn"><Icon name="plus" size={12} /> Add</button>
-      </form>
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button type="button" className="input" onClick={() => setOpen(v => !v)}
+        style={{ width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}>
+        <span style={{ color: selected.length === 0 ? 'var(--ink-3)' : 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {selected.length === 0 ? 'None' : selected.join(', ')}
+        </span>
+        <span style={{ transform: open ? 'rotate(-90deg)' : 'rotate(90deg)', transition: 'transform 0.15s', display: 'inline-flex' }}><Icon name="arrow" size={12} /></span>
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200,
+          background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 8,
+          boxShadow: '0 4px 16px oklch(0.18 0.015 150 / 0.12)', marginTop: 4, overflow: 'hidden' }}>
+          {allSkills.length === 0 && !onAddSkill ? (
+            <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>No skills defined</div>
+          ) : (
+            allSkills.map(s => (
+              <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}
+                onClick={e => e.stopPropagation()}>
+                <input type="checkbox" checked={selected.includes(s)} onChange={() => toggle(s)} />
+                {s}
+              </label>
+            ))
+          )}
+          {onAddSkill && (
+            <form onSubmit={addNew} style={{ display: 'flex', gap: 6, padding: '8px 10px', borderTop: allSkills.length > 0 ? '1px solid var(--line)' : 'none' }}>
+              <input className="input" placeholder="Add skill…" value={newSkill}
+                onChange={e => setNewSkill(e.target.value)} style={{ flex: 1, fontSize: 12 }} />
+              <button type="submit" className="btn" style={{ fontSize: 12, padding: '4px 8px' }}><Icon name="plus" size={11} /></button>
+            </form>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -543,7 +573,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
         <Field label={
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             Crew type
-            <InfoTooltip text="Fixed: exact head count each day. Range: minimum to maximum. Any: no crew constraint — assign as available." />
+            <InfoTooltip text="Fixed: exact head count each day. Range: minimum to maximum. Flexible: no crew constraint — assign as available." />
           </span>
         }>
           <Select value={form.crewSizeType}
@@ -562,12 +592,12 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
                 onChange={v => setForm({ ...form, minCrew: v })} min={1} />
             </Field>
           </div>
-        ) : (
+        ) : form.crewSizeType === 'fixed' ? (
           <Field label="Crew size">
             <NumericInput className="input" value={form.minCrew}
               onChange={v => setForm({ ...form, minCrew: v })} min={1} />
           </Field>
-        )}
+        ) : null}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Field label={`Charge-out rate ($ / ${form.unit === 'hours' ? 'hr' : 'day'})`}>
@@ -590,7 +620,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
         </div>
 
         <Field label="Required skills">
-          <SkillsEditor selected={form.skills} allSkills={state.skills}
+          <SkillsDropdown selected={form.skills} allSkills={state.skills}
             onChange={skills => setForm({ ...form, skills })}
             onAddSkill={state.addSkill} />
         </Field>
@@ -1225,9 +1255,31 @@ function AddProjectModal({ state, onClose }: {
                     />
                   </div>
                 )}
-                <Field label="Crew size">
-                  <NumericInput className="input" value={a.minCrew}
-                    onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, minCrew: v } : x))} min={1} />
+                <Field label="Crew type">
+                  <Select value={a.crewSizeType}
+                    onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, crewSizeType: v as CrewSizeType } : x))}
+                    options={CREW_TYPE_OPTIONS} />
+                </Field>
+                {a.crewSizeType === 'range' ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <Field label="Target">
+                      <NumericInput className="input" value={a.maxCrew ?? 0}
+                        onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, maxCrew: v || undefined } : x))} min={a.minCrew} />
+                    </Field>
+                    <Field label="Minimum">
+                      <NumericInput className="input" value={a.minCrew}
+                        onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, minCrew: v } : x))} min={1} />
+                    </Field>
+                  </div>
+                ) : a.crewSizeType === 'fixed' ? (
+                  <Field label="Crew size">
+                    <NumericInput className="input" value={a.minCrew}
+                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, minCrew: v } : x))} min={1} />
+                  </Field>
+                ) : null}
+                <Field label="Required skills">
+                  <SkillsDropdown selected={a.skills ?? []} allSkills={state.skills}
+                    onChange={skills => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, skills } : x))} />
                 </Field>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <Field label="Charge-out rate ($)">
@@ -1336,9 +1388,31 @@ function AddProjectModal({ state, onClose }: {
                 />
               </div>
             )}
-            <Field label="Crew size">
-              <NumericInput className="input" value={activityForm.minCrew}
-                onChange={v => setActivityForm({ ...activityForm, minCrew: v })} min={1} />
+            <Field label="Crew type">
+              <Select value={activityForm.crewSizeType}
+                onChange={v => setActivityForm({ ...activityForm, crewSizeType: v as CrewSizeType })}
+                options={CREW_TYPE_OPTIONS} />
+            </Field>
+            {activityForm.crewSizeType === 'range' ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <Field label="Target">
+                  <NumericInput className="input" value={activityForm.maxCrew ?? 0}
+                    onChange={v => setActivityForm({ ...activityForm, maxCrew: v || undefined })} min={activityForm.minCrew} />
+                </Field>
+                <Field label="Minimum">
+                  <NumericInput className="input" value={activityForm.minCrew}
+                    onChange={v => setActivityForm({ ...activityForm, minCrew: v })} min={1} />
+                </Field>
+              </div>
+            ) : activityForm.crewSizeType === 'fixed' ? (
+              <Field label="Crew size">
+                <NumericInput className="input" value={activityForm.minCrew}
+                  onChange={v => setActivityForm({ ...activityForm, minCrew: v })} min={1} />
+              </Field>
+            ) : null}
+            <Field label="Required skills">
+              <SkillsDropdown selected={activityForm.skills} allSkills={state.skills}
+                onChange={skills => setActivityForm({ ...activityForm, skills })} />
             </Field>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <Field label="Charge-out rate ($)">
