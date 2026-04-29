@@ -70,14 +70,18 @@ function SkillsDropdown({ selected, allSkills, onChange, onAddSkill }: {
   onAddSkill?: (s: string) => void
 }) {
   const [open, setOpen] = useState(false)
-  const [newSkill, setNewSkill] = useState('')
+  const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     function handleOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (ref.current && !ref.current.contains(e.target as Node)) { setOpen(false); setQuery('') }
     }
-    if (open) document.addEventListener('mousedown', handleOutside)
+    if (open) {
+      document.addEventListener('mousedown', handleOutside)
+      setTimeout(() => searchRef.current?.focus(), 30)
+    }
     return () => document.removeEventListener('mousedown', handleOutside)
   }, [open])
 
@@ -85,27 +89,33 @@ function SkillsDropdown({ selected, allSkills, onChange, onAddSkill }: {
     onChange(selected.includes(s) ? selected.filter(x => x !== s) : [...selected, s])
   }
 
+  const q = query.trim().toLowerCase()
+  const filtered = q ? allSkills.filter(s => s.toLowerCase().includes(q)) : allSkills
+  const exactMatch = allSkills.some(s => s.toLowerCase() === q)
+  const showAdd = onAddSkill && q && !exactMatch
+
   const addNew = (e: React.FormEvent) => {
     e.preventDefault()
-    const s = newSkill.trim()
-    if (!s) return
+    const s = query.trim()
+    if (!s || exactMatch) return
     onAddSkill?.(s)
     if (!selected.includes(s)) onChange([...selected, s])
-    setNewSkill('')
+    setQuery('')
   }
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button type="button" className="input" onClick={() => setOpen(v => !v)}
         style={{ width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}>
-        <span style={{ color: 'var(--ink-3)' }}>Select skills…</span>
+        <span style={{ color: selected.length > 0 ? 'var(--ink)' : 'var(--ink-3)' }}>
+          {selected.length > 0 ? `${selected.length} skill${selected.length !== 1 ? 's' : ''} selected` : 'Select skills…'}
+        </span>
         <span style={{ transform: open ? 'rotate(-90deg)' : 'rotate(90deg)', transition: 'transform 0.15s', display: 'inline-flex' }}><Icon name="arrow" size={12} /></span>
       </button>
       {selected.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
           {selected.map(s => (
-            <button key={s} type="button" onClick={() => toggle(s)}
-              className="skill-chip toggleable on">
+            <button key={s} type="button" onClick={() => toggle(s)} className="skill-chip toggleable on">
               <Icon name="check" size={10} /> {s}
             </button>
           ))}
@@ -115,23 +125,38 @@ function SkillsDropdown({ selected, allSkills, onChange, onAddSkill }: {
         <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200,
           background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 8,
           boxShadow: '0 4px 16px oklch(0.18 0.015 150 / 0.12)', marginTop: 4, overflow: 'hidden' }}>
-          {allSkills.length === 0 && !onAddSkill ? (
-            <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>No skills defined</div>
+          {/* Search / add at top */}
+          <form onSubmit={addNew} style={{ display: 'flex', gap: 6, padding: '8px 10px', borderBottom: '1px solid var(--line)' }}>
+            <input
+              ref={searchRef}
+              className="input"
+              placeholder={onAddSkill ? 'Search or add skill…' : 'Search skills…'}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onClick={e => e.stopPropagation()}
+              style={{ flex: 1, fontSize: 12 }}
+            />
+            {showAdd && (
+              <button type="submit" className="btn primary" style={{ fontSize: 12, padding: '4px 10px', flexShrink: 0 }}>
+                + Add
+              </button>
+            )}
+          </form>
+          {/* Skills list */}
+          {filtered.length === 0 ? (
+            <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+              {q ? 'No matching skills' : 'No skills defined'}
+            </div>
           ) : (
-            allSkills.map(s => (
-              <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}
-                onClick={e => e.stopPropagation()}>
-                <input type="checkbox" checked={selected.includes(s)} onChange={() => toggle(s)} />
-                {s}
-              </label>
-            ))
-          )}
-          {onAddSkill && (
-            <form onSubmit={addNew} style={{ display: 'flex', gap: 6, padding: '8px 10px', borderTop: allSkills.length > 0 ? '1px solid var(--line)' : 'none' }}>
-              <input className="input" placeholder="Add skill…" value={newSkill}
-                onChange={e => setNewSkill(e.target.value)} style={{ flex: 1, fontSize: 12 }} />
-              <button type="submit" className="btn" style={{ fontSize: 12, padding: '4px 8px' }}><Icon name="plus" size={11} /></button>
-            </form>
+            <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+              {filtered.map(s => (
+                <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}
+                  onClick={e => e.stopPropagation()}>
+                  <input type="checkbox" checked={selected.includes(s)} onChange={() => toggle(s)} />
+                  {s}
+                </label>
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -216,7 +241,7 @@ function ZoneSearchDropdown({ linkedIds, allOrgSites, onLink, onCreateAndLink }:
 
 // ── AllocationSpreadPanel ─────────────────────────────────────────────────────
 
-function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, customAllocs, onCustomAllocsChange, activityStart, activityEnd }: {
+function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, customAllocs, onCustomAllocsChange, activityStart, activityEnd, effectiveCrew = 1 }: {
   strategy: AllocationStrategy
   months: string[]
   totalAllocation: number
@@ -225,6 +250,7 @@ function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, custom
   onCustomAllocsChange?: (allocs: Record<string, number>) => void
   activityStart?: string
   activityEnd?: string
+  effectiveCrew?: number
 }) {
   const monthLabel = (m: string) => {
     const [y, mo] = m.split('-')
@@ -289,6 +315,10 @@ function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, custom
       delete next[d]
       onCustomAllocsChange?.(next)
     }
+    const computedTotal = unit === 'hours'
+      ? selectedDates.length * effectiveCrew * DAY_HOURS
+      : selectedDates.length
+    const hoursPerDay = unit === 'hours' ? effectiveCrew * DAY_HOURS : null
     return (
       <div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
@@ -300,6 +330,9 @@ function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, custom
         {selectedDates.map(d => (
           <div key={d} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink)', flex: 1 }}>{d}</span>
+            {hoursPerDay !== null && (
+              <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>{hoursPerDay}h</span>
+            )}
             <button type="button" onClick={() => removeDate(d)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', fontSize: 14, lineHeight: 1, padding: '2px 4px' }}>×</button>
           </div>
@@ -315,11 +348,12 @@ function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, custom
             }}
             style={{ flex: 1 }} />
         </div>
-        {selectedDates.length > 0 && (
-          <div style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--line)' }}>
-            {selectedDates.length} date{selectedDates.length !== 1 ? 's' : ''} selected
-          </div>
-        )}
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--line)', fontSize: 12 }}>
+          <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>Total selected</span>
+          <span style={{ fontWeight: 600, color: computedTotal === totalAllocation ? 'var(--accent)' : 'var(--warn)' }}>
+            {computedTotal} / {totalAllocation} {unit}
+          </span>
+        </div>
       </div>
     )
   }
@@ -627,6 +661,35 @@ function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
           )}
         </Field>
 
+        <Field label={
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            Crew type
+            <InfoTooltip text="Fixed: exact head count each day. Range: minimum to maximum. Flexible: no crew constraint — assign as available." />
+          </span>
+        }>
+          <Select value={form.crewSizeType}
+            onChange={v => setForm({ ...form, crewSizeType: v as CrewSizeType })}
+            options={CREW_TYPE_OPTIONS} />
+        </Field>
+
+        {form.crewSizeType === 'range' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <Field label="Target">
+              <NumericInput className="input" value={form.maxCrew ?? 0}
+                onChange={v => setForm({ ...form, maxCrew: v || undefined })} min={form.minCrew} />
+            </Field>
+            <Field label="Minimum">
+              <NumericInput className="input" value={form.minCrew}
+                onChange={v => setForm({ ...form, minCrew: v })} min={1} />
+            </Field>
+          </div>
+        ) : form.crewSizeType === 'fixed' ? (
+          <Field label="Crew size">
+            <NumericInput className="input" value={form.minCrew}
+              onChange={v => setForm({ ...form, minCrew: v })} min={1} />
+          </Field>
+        ) : null}
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Field label="Work unit">
             <Select value={form.unit}
@@ -666,6 +729,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
               onCustomAllocsChange={setCustomAllocs}
               activityStart={form.start}
               activityEnd={form.end}
+              effectiveCrew={form.crewSizeType === 'range' ? (form.maxCrew ?? form.minCrew) : form.crewSizeType === 'fixed' ? form.minCrew : 1}
             />
             {form.allocationStrategy === 'custom' && !existing && (
               <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 8 }}>
@@ -674,35 +738,6 @@ function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
             )}
           </div>
         )}
-
-        <Field label={
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            Crew type
-            <InfoTooltip text="Fixed: exact head count each day. Range: minimum to maximum. Flexible: no crew constraint — assign as available." />
-          </span>
-        }>
-          <Select value={form.crewSizeType}
-            onChange={v => setForm({ ...form, crewSizeType: v as CrewSizeType })}
-            options={CREW_TYPE_OPTIONS} />
-        </Field>
-
-        {form.crewSizeType === 'range' ? (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <Field label="Target">
-              <NumericInput className="input" value={form.maxCrew ?? 0}
-                onChange={v => setForm({ ...form, maxCrew: v || undefined })} min={form.minCrew} />
-            </Field>
-            <Field label="Minimum">
-              <NumericInput className="input" value={form.minCrew}
-                onChange={v => setForm({ ...form, minCrew: v })} min={1} />
-            </Field>
-          </div>
-        ) : form.crewSizeType === 'fixed' ? (
-          <Field label="Crew size">
-            <NumericInput className="input" value={form.minCrew}
-              onChange={v => setForm({ ...form, minCrew: v })} min={1} />
-          </Field>
-        ) : null}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Field label={`Charge-out rate ($ / ${form.unit === 'hours' ? 'hr' : 'day'})`}>
@@ -1332,44 +1367,6 @@ function AddProjectModal({ state, onClose }: {
                     onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, priority: v as Priority } : x))}
                     options={PRIORITY_OPTIONS} />
                 </Field>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <Field label="Work unit">
-                    <Select value={a.unit}
-                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, unit: v as WorkUnit } : x))}
-                      options={UNIT_OPTIONS} />
-                  </Field>
-                  <Field label={`Total ${a.unit}`}>
-                    <NumericInput className="input" value={a.totalAllocation}
-                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, totalAllocation: Math.round(v) } : x))} min={0} step={1} />
-                  </Field>
-                </div>
-                <Field label="Allocation strategy">
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <div style={{ flex: 1 }}>
-                      <Select value={a.allocationStrategy}
-                        onChange={v => {
-                          setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, allocationStrategy: v as AllocationStrategy } : x))
-                          if (v === 'custom') setShowExpandedSpread(true)
-                        }}
-                        options={ALLOCATION_OPTIONS} />
-                    </div>
-                    <SpreadToggleButton open={showExpandedSpread} onClick={() => setShowExpandedSpread(s => !s)} />
-                  </div>
-                </Field>
-                {showExpandedSpread && (
-                  <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: -2 }}>
-                    <AllocationSpreadPanel
-                      strategy={a.allocationStrategy}
-                      months={monthsBetween(p.start, p.end)}
-                      totalAllocation={a.totalAllocation}
-                      unit={a.unit}
-                      customAllocs={a.customAllocs ?? {}}
-                      onCustomAllocsChange={allocs => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, customAllocs: allocs } : x))}
-                      activityStart={p.start}
-                      activityEnd={p.end}
-                    />
-                  </div>
-                )}
                 <Field label="Crew type">
                   <Select value={a.crewSizeType}
                     onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, crewSizeType: v as CrewSizeType } : x))}
@@ -1392,6 +1389,45 @@ function AddProjectModal({ state, onClose }: {
                       onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, minCrew: v } : x))} min={1} />
                   </Field>
                 ) : null}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <Field label="Work unit">
+                    <Select value={a.unit}
+                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, unit: v as WorkUnit } : x))}
+                      options={UNIT_OPTIONS} />
+                  </Field>
+                  <Field label={`Total ${a.unit}`}>
+                    <NumericInput className="input" value={a.totalAllocation}
+                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, totalAllocation: Math.round(v) } : x))} min={0} step={1} />
+                  </Field>
+                </div>
+                <Field label="Allocation strategy">
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      <Select value={a.allocationStrategy}
+                        onChange={v => {
+                          setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, allocationStrategy: v as AllocationStrategy } : x))
+                          if (v === 'custom' || v === 'custom_date') setShowExpandedSpread(true)
+                        }}
+                        options={ALLOCATION_OPTIONS} />
+                    </div>
+                    <SpreadToggleButton open={showExpandedSpread} onClick={() => setShowExpandedSpread(s => !s)} />
+                  </div>
+                </Field>
+                {showExpandedSpread && (
+                  <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: -2 }}>
+                    <AllocationSpreadPanel
+                      strategy={a.allocationStrategy}
+                      months={monthsBetween(p.start, p.end)}
+                      totalAllocation={a.totalAllocation}
+                      unit={a.unit}
+                      customAllocs={a.customAllocs ?? {}}
+                      onCustomAllocsChange={allocs => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, customAllocs: allocs } : x))}
+                      activityStart={p.start}
+                      activityEnd={p.end}
+                      effectiveCrew={a.crewSizeType === 'range' ? (a.maxCrew ?? a.minCrew) : a.crewSizeType === 'fixed' ? a.minCrew : 1}
+                    />
+                  </div>
+                )}
                 <Field label="Required skills">
                   <SkillsDropdown selected={a.skills ?? []} allSkills={state.skills}
                     onChange={skills => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, skills } : x))}
@@ -1468,44 +1504,6 @@ function AddProjectModal({ state, onClose }: {
                 onChange={v => setActivityForm({ ...activityForm, priority: v as Priority })}
                 options={PRIORITY_OPTIONS} />
             </Field>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <Field label="Work unit">
-                <Select value={activityForm.unit}
-                  onChange={v => setActivityForm({ ...activityForm, unit: v as WorkUnit })}
-                  options={UNIT_OPTIONS} />
-              </Field>
-              <Field label={`Total ${activityForm.unit}`}>
-                <NumericInput className="input" value={activityForm.totalAllocation}
-                  onChange={v => setActivityForm({ ...activityForm, totalAllocation: Math.round(v) })} min={0} step={1} />
-              </Field>
-            </div>
-            <Field label="Allocation strategy">
-              <div style={{ display: 'flex', gap: 6 }}>
-                <div style={{ flex: 1 }}>
-                  <Select value={activityForm.allocationStrategy}
-                    onChange={v => {
-                      setActivityForm({ ...activityForm, allocationStrategy: v as AllocationStrategy })
-                      if (v === 'custom') setShowNewActivitySpread(true)
-                    }}
-                    options={ALLOCATION_OPTIONS} />
-                </div>
-                <SpreadToggleButton open={showNewActivitySpread} onClick={() => setShowNewActivitySpread(s => !s)} />
-              </div>
-            </Field>
-            {showNewActivitySpread && (
-              <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: -2, marginBottom: 4 }}>
-                <AllocationSpreadPanel
-                  strategy={activityForm.allocationStrategy}
-                  months={monthsBetween(p.start, p.end)}
-                  totalAllocation={activityForm.totalAllocation}
-                  unit={activityForm.unit}
-                  customAllocs={activityForm.customAllocs}
-                  onCustomAllocsChange={allocs => setActivityForm({ ...activityForm, customAllocs: allocs })}
-                  activityStart={p.start}
-                  activityEnd={p.end}
-                />
-              </div>
-            )}
             <Field label="Crew type">
               <Select value={activityForm.crewSizeType}
                 onChange={v => setActivityForm({ ...activityForm, crewSizeType: v as CrewSizeType })}
@@ -1528,6 +1526,45 @@ function AddProjectModal({ state, onClose }: {
                   onChange={v => setActivityForm({ ...activityForm, minCrew: v })} min={1} />
               </Field>
             ) : null}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <Field label="Work unit">
+                <Select value={activityForm.unit}
+                  onChange={v => setActivityForm({ ...activityForm, unit: v as WorkUnit })}
+                  options={UNIT_OPTIONS} />
+              </Field>
+              <Field label={`Total ${activityForm.unit}`}>
+                <NumericInput className="input" value={activityForm.totalAllocation}
+                  onChange={v => setActivityForm({ ...activityForm, totalAllocation: Math.round(v) })} min={0} step={1} />
+              </Field>
+            </div>
+            <Field label="Allocation strategy">
+              <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ flex: 1 }}>
+                  <Select value={activityForm.allocationStrategy}
+                    onChange={v => {
+                      setActivityForm({ ...activityForm, allocationStrategy: v as AllocationStrategy })
+                      if (v === 'custom' || v === 'custom_date') setShowNewActivitySpread(true)
+                    }}
+                    options={ALLOCATION_OPTIONS} />
+                </div>
+                <SpreadToggleButton open={showNewActivitySpread} onClick={() => setShowNewActivitySpread(s => !s)} />
+              </div>
+            </Field>
+            {showNewActivitySpread && (
+              <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: -2, marginBottom: 4 }}>
+                <AllocationSpreadPanel
+                  strategy={activityForm.allocationStrategy}
+                  months={monthsBetween(p.start, p.end)}
+                  totalAllocation={activityForm.totalAllocation}
+                  unit={activityForm.unit}
+                  customAllocs={activityForm.customAllocs}
+                  onCustomAllocsChange={allocs => setActivityForm({ ...activityForm, customAllocs: allocs })}
+                  activityStart={p.start}
+                  activityEnd={p.end}
+                  effectiveCrew={activityForm.crewSizeType === 'range' ? (activityForm.maxCrew ?? activityForm.minCrew) : activityForm.crewSizeType === 'fixed' ? activityForm.minCrew : 1}
+                />
+              </div>
+            )}
             <Field label="Required skills">
               <SkillsDropdown selected={activityForm.skills} allSkills={state.skills}
                 onChange={skills => setActivityForm({ ...activityForm, skills })}
