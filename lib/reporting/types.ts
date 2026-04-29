@@ -222,3 +222,34 @@ export type SpeciesData = {
   cards: SpeciesLookupCard[]
   generatedAt: string
 }
+
+// ─── E11: Inspections list ──────────────────────────────────────────
+
+export type InspectionTemplateType =
+  | 'daily_work_report'
+  | 'chemical_application_record'
+  | (string & {})
+
+export type InspectionRow = {
+  id: string
+  date: string | null
+  siteName: string | null
+  templateType: InspectionTemplateType
+  supervisorName: string | null
+  taskCount: number
+  weedCount: number
+  photoCount: number
+  status: ProcessingStatus
+}
+
+export type InspectionsListData = {
+  rows: InspectionRow[]
+  totals: {
+    total: number
+    dailyWorkReports: number
+    chemicalRecords: number
+    failed: number
+  }
+  shown: number
+  generatedAt: string
+}
