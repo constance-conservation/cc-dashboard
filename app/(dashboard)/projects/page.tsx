@@ -96,11 +96,19 @@ function SkillsDropdown({ selected, allSkills, onChange, onAddSkill }: {
     <div ref={ref} style={{ position: 'relative' }}>
       <button type="button" className="input" onClick={() => setOpen(v => !v)}
         style={{ width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}>
-        <span style={{ color: selected.length === 0 ? 'var(--ink-3)' : 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {selected.length === 0 ? 'None' : selected.join(', ')}
-        </span>
+        <span style={{ color: 'var(--ink-3)' }}>Select skills…</span>
         <span style={{ transform: open ? 'rotate(-90deg)' : 'rotate(90deg)', transition: 'transform 0.15s', display: 'inline-flex' }}><Icon name="arrow" size={12} /></span>
       </button>
+      {selected.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+          {selected.map(s => (
+            <button key={s} type="button" onClick={() => toggle(s)}
+              className="skill-chip toggleable on">
+              <Icon name="check" size={10} /> {s}
+            </button>
+          ))}
+        </div>
+      )}
       {open && (
         <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200,
           background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 8,
