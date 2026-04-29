@@ -48,7 +48,7 @@ function makeEmployee(overrides: Partial<Employee> = {}): Employee {
   return {
     id: 'emp-1',
     name: 'Test Employee',
-    role: 'Field Worker',
+    role: 'Field Supervisor',
     type: 'full-time',
     payRate: 0,
     email: '',
@@ -242,7 +242,11 @@ describe('autoGenerate', () => {
 
   it('respects fixed crew size — assigns exactly minCrew employees', () => {
     const activity = makeActivity({ crewSizeType: 'fixed', minCrew: 2 })
-    const employees = [makeEmployee({ id: 'emp-1' }), makeEmployee({ id: 'emp-2' }), makeEmployee({ id: 'emp-3' })]
+    const employees = [
+      makeEmployee({ id: 'emp-1', role: 'Field Supervisor' }),
+      makeEmployee({ id: 'emp-2', role: 'Field Worker' }),
+      makeEmployee({ id: 'emp-3', role: 'Field Worker' }),
+    ]
     const result = autoGenerate([activity], employees, '2026-04', new Set())
     const firstDay = Object.values(result)[0]
     expect(firstDay.filter(a => a.activityId === 'act-1').length).toBe(2)

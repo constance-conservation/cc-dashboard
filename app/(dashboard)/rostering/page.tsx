@@ -8,7 +8,7 @@ import { Drawer } from '@/components/dashboard/Drawer'
 import { NumericInput } from '@/components/dashboard/NumericInput'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import type { RosterAssignment, Activity, Employee, ActivityCarryover, CarryoverStatus } from '@/lib/types'
-import { DAY_KEYS, type DayKey, dateKey, weekdayIdx, weekdayName, parseDate, computeMonthlyTarget, detectUnderstaffing, autoGenerate, getProjectsWithActivitiesOnDay, computeProjectShortfalls, DAY_HOURS, type AutoGenerateOptions, type DailyWeather } from '@/lib/rostering/engine'
+import { DAY_KEYS, type DayKey, dateKey, weekdayIdx, weekdayName, parseDate, computeMonthlyTarget, detectUnderstaffing, autoGenerate, getProjectsWithActivitiesOnDay, computeProjectShortfalls, isLeaderRole, DAY_HOURS, type AutoGenerateOptions, type DailyWeather } from '@/lib/rostering/engine'
 
 function daysInMonth(ym: string) {
   const [y, m] = ym.split('-').map(Number)
@@ -142,7 +142,7 @@ function CalDay({ day, ym, state, onOpen }: {
         const crewSize = act?.crewSizeType !== 'any' ? (act?.minCrew ?? null) : null
         const hasLeader = empIds.some(eid => {
           const e = state.employees.find(x => x.id === eid)
-          return e && (e.role === 'Field Supervisor' || e.role === 'Team Leader')
+          return e && isLeaderRole(e.role)
         })
         return (
           <div key={pid} className="cal-shift">
@@ -160,7 +160,7 @@ function CalDay({ day, ym, state, onOpen }: {
                 {empIds.slice(0, 4).map((eid, i) => {
                   const e     = state.employees.find(x => x.id === eid)
                   if (!e) return null
-                  const isLeader = e.role === 'Field Supervisor' || e.role === 'Team Leader'
+                  const isLeader = isLeaderRole(e.role)
                   return (
                     <div key={eid}
                       className={`cal-avatar${isLeader ? ' sup' : ''}`}
@@ -290,7 +290,7 @@ function DayEditor({ day, ym, state, onClose }: {
 
             const hasLeader = projAssignments.some(a => {
               const e = state.employees.find(x => x.id === a.employeeId)
-              return e && (e.role === 'Field Supervisor' || e.role === 'Team Leader')
+              return e && isLeaderRole(e.role)
             })
             return (
               <div key={pid} style={{ marginBottom: 8, border: `1px solid ${!hasLeader && projAssignments.length > 0 ? '#d97706' : 'var(--line)'}`, borderRadius: 8, overflow: 'hidden' }}>
@@ -632,6 +632,90 @@ function ProjectsDrawer({ state, rosterMonth, activityVisits, shortfallProjectId
   )
 }
 
+// ── Shortfall rollover modal ──────────────────────────────────────────────────
+
+type ShortfallEntry = {
+  activityId: string
+  activityName: string
+  projectName: string
+  target: number
+  actual: number
+  unit: string
+  selected: boolean
+}
+
+function ShortfallModal({ entries, rosterMonth, onChange, onConfirm, onClose }: {
+  entries: ShortfallEntry[]
+  rosterMonth: string
+  onChange: (idx: number, selected: boolean) => void
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  const selectedCount = entries.filter(e => e.selected).length
+  const [ry, rm] = rosterMonth.split('-').map(Number)
+  const nextMonthLabel = new Date(ry, rm, 1).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })
+
+  return (
+    <Drawer
+      title="Activities not fully rostered"
+      subtitle={`${entries.length} activit${entries.length !== 1 ? 'ies' : 'y'} below target · ${selectedCount} set to roll over`}
+      onClose={onClose}
+      onSave={onConfirm}
+      saveLabel={selectedCount > 0 ? `Roll ${selectedCount} to ${nextMonthLabel}` : 'Dismiss'}
+    >
+      <div style={{ marginBottom: 14, fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+        These activities couldn't be fully rostered — due to weather, no available supervisor, or insufficient working days. Select which to carry over into {nextMonthLabel}.
+      </div>
+      {entries.map((entry, idx) => {
+        const shortfall = entry.target - entry.actual
+        const shortfallLabel = entry.unit === 'hours'
+          ? `${shortfall * DAY_HOURS} hr${shortfall * DAY_HOURS !== 1 ? 's' : ''} short`
+          : `${shortfall} day${shortfall !== 1 ? 's' : ''} short`
+        const progressLabel = entry.unit === 'hours'
+          ? `${entry.actual * DAY_HOURS}/${entry.target * DAY_HOURS} hrs`
+          : `${entry.actual}/${entry.target} days`
+        return (
+          <div key={idx} style={{
+            display: 'flex', gap: 10, alignItems: 'center',
+            padding: '10px 12px', background: 'var(--bg-sunken)',
+            borderRadius: 6, marginBottom: 6,
+            border: `1px solid ${entry.selected ? 'var(--accent)' : 'transparent'}`,
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{entry.activityName}</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+                {entry.projectName} · {progressLabel} · <span style={{ color: '#d97706' }}>{shortfallLabel}</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                className={`btn${entry.selected ? ' primary' : ''}`}
+                style={{ fontSize: 11, padding: '3px 10px', height: 26 }}
+                onClick={() => onChange(idx, true)}
+              >
+                Roll over
+              </button>
+              <button
+                className="btn"
+                style={{ fontSize: 11, padding: '3px 10px', height: 26, color: !entry.selected ? 'var(--ink-1)' : 'var(--ink-3)' }}
+                onClick={() => onChange(idx, false)}
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+        )
+      })}
+      <div style={{ marginTop: 8 }}>
+        <button className="btn" style={{ fontSize: 11, color: 'var(--ink-3)' }}
+          onClick={() => entries.forEach((_, i) => onChange(i, false))}>
+          Skip all
+        </button>
+      </div>
+    </Drawer>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function RosteringPage() {
@@ -643,7 +727,8 @@ export default function RosteringPage() {
   const [showCarryoverReview, setShowCarryoverReview] = useState(false)
   const [reviewEntries, setReviewEntries]             = useState<ReviewEntry[]>([])
   const [generating, setGenerating]                   = useState(false)
-  const [weatherNotice, setWeatherNotice]             = useState<string[] | null>(null)
+  const [shortfallEntries, setShortfallEntries]       = useState<ShortfallEntry[]>([])
+  const [showShortfall, setShowShortfall]             = useState(false)
 
   const n = daysInMonth(state.rosterMonth)
   const hasSat = state.employees.some(e => e.availability.sat)
@@ -729,25 +814,34 @@ export default function RosteringPage() {
       Object.assign(newRoster, generated)
       state.setRoster(newRoster)
 
-      // Detect weather-constrained activities that got fewer visits than target
-      const weatherNotices: string[] = []
+      // Detect all activities that fell below their monthly target (any reason)
+      const shortfalls: ShortfallEntry[] = []
       for (const act of state.activities) {
         if (act.status !== 'active') continue
-        const actType = state.activityTypes.find(t => t.id === act.activityTypeId)
-        if (!actType?.weatherConstraints?.length) continue
-        const proj = state.projects.find(p => p.id === act.projectId)
-        if (!proj?.lat || !proj?.lng) continue
+        const target = computeMonthlyTarget(act, state.rosterMonth, state.allocations)
+        if (target <= 0) continue
         let visits = 0
         for (const dKey in generated) {
           if (!dKey.startsWith(state.rosterMonth)) continue
           if (generated[dKey].some(a => a.activityId === act.id)) visits++
         }
-        const target = computeMonthlyTarget(act, state.rosterMonth, state.allocations)
-        if (target > 0 && visits < target) {
-          weatherNotices.push(act.name)
+        if (visits < target) {
+          const project = state.projects.find(p => p.id === act.projectId)
+          shortfalls.push({
+            activityId: act.id,
+            activityName: act.name,
+            projectName: project?.name ?? 'Unknown project',
+            target,
+            actual: visits,
+            unit: act.unit,
+            selected: true,
+          })
         }
       }
-      if (weatherNotices.length > 0) setWeatherNotice(weatherNotices)
+      if (shortfalls.length > 0) {
+        setShortfallEntries(shortfalls)
+        setShowShortfall(true)
+      }
     } finally {
       setGenerating(false)
     }
@@ -814,6 +908,22 @@ export default function RosteringPage() {
     runAutoGenerate(new Set())
   }
 
+  const handleShortfallConfirm = () => {
+    setShowShortfall(false)
+    const [ry, rm] = state.rosterMonth.split('-').map(Number)
+    const lastDay = new Date(ry, rm, 0).getDate()
+    const originalDateKey = `${state.rosterMonth}-${String(lastDay).padStart(2, '0')}`
+    const newCarryovers = shortfallEntries
+      .filter(e => e.selected)
+      .map(e => ({
+        activityId: e.activityId,
+        originalDateKey,
+        unitsMissed: e.target - e.actual,
+        status: 'approved' as CarryoverStatus,
+      }))
+    if (newCarryovers.length > 0) state.addCarryovers(newCarryovers)
+  }
+
   const handleConfirmClear = () => {
     setConfirmAction(null)
     const newRoster = { ...state.roster }
@@ -825,13 +935,11 @@ export default function RosteringPage() {
     const [yr, mo] = state.rosterMonth.split('-').map(Number)
     const d = new Date(yr, mo - 2, 1)
     state.setRosterMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
-    setWeatherNotice(null)
   }
   const nextMonth = () => {
     const [yr, mo] = state.rosterMonth.split('-').map(Number)
     const d = new Date(yr, mo, 1)
     state.setRosterMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
-    setWeatherNotice(null)
   }
 
   // ── Calendar grid ──────────────────────────────────────────────────────────
@@ -881,29 +989,6 @@ export default function RosteringPage() {
           }}>Today</button>
         </div>
 
-        {weatherNotice && (
-          <div style={{
-            display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px',
-            background: 'var(--warning-soft, oklch(0.97 0.04 85))',
-            border: '1px solid var(--warning, oklch(0.75 0.12 85))',
-            borderRadius: 8, marginBottom: 14, fontSize: 13,
-          }}>
-            <div style={{ flex: 1 }}>
-              <strong>Weather constraints may have reduced scheduling</strong>
-              <div style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 3 }}>
-                {weatherNotice.length === 1
-                  ? `"${weatherNotice[0]}" was scheduled fewer times than planned — weather conditions may have blocked some days.`
-                  : `${weatherNotice.length} activities were scheduled fewer times than planned — weather conditions may have blocked some days: ${weatherNotice.slice(0, 3).join(', ')}${weatherNotice.length > 3 ? ` +${weatherNotice.length - 3} more` : ''}.`
-                }
-              </div>
-            </div>
-            <button className="iconbtn" style={{ color: 'var(--ink-3)', flexShrink: 0 }}
-              onClick={() => setWeatherNotice(null)}>
-              <Icon name="close" size={13} />
-            </button>
-          </div>
-        )}
-
         {/* Calendar */}
         <div className="cal">
           <div className="cal-head" style={{ gridTemplateColumns: `repeat(${cols.length}, 1fr)` }}>
@@ -930,6 +1015,18 @@ export default function RosteringPage() {
           activityVisits={stats.activityVisits}
           shortfallProjectIds={stats.shortfallProjectIds}
           onClose={() => setShowProjects(false)}
+        />
+      )}
+
+      {showShortfall && (
+        <ShortfallModal
+          entries={shortfallEntries}
+          rosterMonth={state.rosterMonth}
+          onChange={(idx, selected) =>
+            setShortfallEntries(prev => prev.map((e, i) => i === idx ? { ...e, selected } : e))
+          }
+          onConfirm={handleShortfallConfirm}
+          onClose={() => setShowShortfall(false)}
         />
       )}
 

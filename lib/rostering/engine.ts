@@ -5,7 +5,11 @@ export { type WeatherMetric, type WeatherConstraint, type DailyWeather }
 export const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 export type DayKey = typeof DAY_KEYS[number]
 export const DAY_HOURS = 8
-const LEADERSHIP_ROLES = new Set(['Field Supervisor', 'Team Leader'])
+
+// Case-insensitive: matches "Supervisor", "Field Supervisor", "Team Leader", "Team Lead", etc.
+export function isLeaderRole(role: string): boolean {
+  return /supervisor/i.test(role) || /team\s*lead/i.test(role)
+}
 // Passed to autoGenerate for intelligent scheduling
 export type AutoGenerateOptions = {
   projects?: Array<{ id: string; lat?: number; lng?: number }>
@@ -348,10 +352,13 @@ export function autoGenerate(
       )
       if (avail.length === 0) return
 
+      // Hard constraint: skip this activity if no leadership role is available today
+      if (!avail.some(e => isLeaderRole(e.role))) return
+
       const scored = avail.map(e => ({
         e,
         score: act.skills.filter(s => e.skills.includes(s)).length
-          + (LEADERSHIP_ROLES.has(e.role) ? 2.0 : 0)
+          + (isLeaderRole(e.role) ? 2.0 : 0)
           - (empLoad[e.id] ?? 0) * 0.1,
       })).sort((a, b) => b.score - a.score)
 
@@ -362,25 +369,25 @@ export function autoGenerate(
 
       if (scored.length < minNeeded) return
 
+      // Always lead with the best-scored leader (at most one supervisor role)
       let hasSup = false
-      let hasLeader = false
       const chosen: Employee[] = []
       for (const { e } of scored) {
-        if (chosen.length >= maxAllowed) break
-        if (e.role === 'Field Supervisor') {
-          if (hasSup) continue  // at most one supervisor per project per day
-          hasSup = true; hasLeader = true
-        } else if (e.role === 'Team Leader') {
-          hasLeader = true
-        }
+        if (!isLeaderRole(e.role)) continue
+        const isSup = /supervisor/i.test(e.role)
+        if (isSup && hasSup) continue
+        if (isSup) hasSup = true
         chosen.push(e)
+        break
       }
-      // If no leadership included and there's room, inject one
-      if (!hasLeader && chosen.length < maxAllowed) {
-        const leaderEntry = scored.find(({ e }) =>
-          !chosen.includes(e) && LEADERSHIP_ROLES.has(e.role) && !(e.role === 'Field Supervisor' && hasSup)
-        )
-        if (leaderEntry) { chosen.push(leaderEntry.e); hasLeader = true }
+      // Fill remaining slots with the highest-scored remaining employees
+      for (const { e } of scored) {
+        if (chosen.length >= maxAllowed) break
+        if (chosen.includes(e)) continue
+        const isSup = /supervisor/i.test(e.role)
+        if (isSup && hasSup) continue
+        if (isSup) hasSup = true
+        chosen.push(e)
       }
       if (chosen.length < minNeeded) return
 
