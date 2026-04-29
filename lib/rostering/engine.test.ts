@@ -92,12 +92,24 @@ describe('computeMonthlyTarget', () => {
     expect(computeMonthlyTarget(a, '2026-07')).toBe(0)
   })
 
-  it('distributes even-spread allocation across calendar months', () => {
-    // 3 days over Apr–Jun = 1 day per month
+  it('distributes even-spread allocation evenly across calendar months', () => {
+    // 3 days over Apr–Jun = 1 per month, sum = 3
     const a = makeActivity({ start: '2026-04-01', end: '2026-06-30', totalAllocation: 3 })
     expect(computeMonthlyTarget(a, '2026-04')).toBe(1)
     expect(computeMonthlyTarget(a, '2026-05')).toBe(1)
     expect(computeMonthlyTarget(a, '2026-06')).toBe(1)
+  })
+
+  it('distributes odd allocation using floor + remainder (4 days over 3 months)', () => {
+    // 4 / 3 → base=1, extras=1 → month 0 gets +1, months 1–2 get base only
+    const a = makeActivity({ start: '2026-04-01', end: '2026-06-30', totalAllocation: 4 })
+    const apr = computeMonthlyTarget(a, '2026-04')
+    const may = computeMonthlyTarget(a, '2026-05')
+    const jun = computeMonthlyTarget(a, '2026-06')
+    expect(apr + may + jun).toBe(4)
+    expect(apr).toBe(2)
+    expect(may).toBe(1)
+    expect(jun).toBe(1)
   })
 
   it('handles activity starting on last day of month (timezone edge case)', () => {

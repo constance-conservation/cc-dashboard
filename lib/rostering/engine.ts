@@ -54,9 +54,12 @@ export function computeMonthlyTarget(
   }
 
   const totalMonths = Math.max(1, calendarMonthsSpanned(actStart, actEnd))
-  return a.unit === 'days'
-    ? Math.max(1, Math.ceil(remaining / totalMonths))
-    : Math.max(1, Math.ceil(remaining / totalMonths / DAY_HOURS))
+  const monthIndex  = (y - actStart.getFullYear()) * 12 + (m - 1 - actStart.getMonth())
+  const base        = Math.floor(remaining / totalMonths)
+  const extras      = remaining % totalMonths
+  const raw         = base + (monthIndex < extras ? 1 : 0)
+  const perMonth    = a.unit === 'days' ? raw : Math.ceil(raw / DAY_HOURS)
+  return Math.max(0, perMonth)
 }
 
 // Detect days in a month where an activity was understaffed.
