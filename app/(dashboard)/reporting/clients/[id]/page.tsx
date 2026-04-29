@@ -4,6 +4,7 @@ import { Icon } from '@/components/icons/Icon'
 import { getClientDetailData } from '@/lib/reporting/queries'
 import { RowCard } from '@/components/reporting/RowCard'
 import { GenerateReportButton } from '@/components/reporting/GenerateReportButton'
+import { CadenceSelector } from '@/components/reporting/CadenceSelector'
 
 export const dynamic = 'force-dynamic'
 
@@ -66,7 +67,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             <Field label="Council/body" value={client.councilOrBody} />
             <Field label="Email" value={client.contactEmail} />
             <Field label="Phone" value={client.contactPhone} />
-            <Field label="Frequency" value={client.reportFrequency} />
+          </div>
+          <div style={{ borderTop: '1px solid var(--line)', padding: '14px 16px' }}>
+            <CadenceSelector clientId={client.id} currentValue={client.reportFrequency} />
           </div>
         </div>
 

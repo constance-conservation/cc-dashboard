@@ -236,6 +236,32 @@ A reviewer can:
 
 ---
 
+## Scope expansion — 2026-04-29
+
+After initial E9 implementation shipped (commits `f5c91b5`, `cf2a55c` on
+branch), Peter requested a small editable addition: a **client report
+cadence selector** on `/reporting/clients/[id]`.
+
+- Dropdown + Save button writes `clients.report_frequency` via a
+  Server Action.
+- Options: `Weekly | Fortnightly | Monthly | Quarterly | Annually | None`
+- Server Action lives at `app/(dashboard)/reporting/clients/actions.ts`.
+- Client component at `components/reporting/CadenceSelector.tsx`.
+- After save: `revalidatePath` on the detail page and the clients list
+  (so the cadence column on the client card reflects new value).
+- **Scope is clients only.** Site / zone-level cadence is deferred — the
+  `sites` table doesn't have a `report_frequency` column today; adding
+  per-site cadence would require a migration and is its own brief.
+- **Storage only.** This sets the *configured* cadence. The cron
+  infrastructure that *consumes* it (auto-generates reports on schedule)
+  ships in E12. No behaviour change today beyond persistence.
+
+This breaks E9's original "read-only" invariant. The expansion is
+captured here rather than splitting into a new brief because (a) it's
+small and (b) it lands in the same PR.
+
+---
+
 ## Workstream procedure
 
 1. **Sign-off** on this brief (Peter — review §Open questions, override defaults if needed).
