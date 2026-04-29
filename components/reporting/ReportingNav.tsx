@@ -18,6 +18,7 @@ const SECTIONS: Section[] = [
     items: [
       { name: 'Dashboard',   icon: 'projects',  href: '/reporting' },
       { name: 'Inspections', icon: 'tasks',     href: '/reporting/inspections' },
+      { name: 'Sites',       icon: 'projects',  href: '/reporting/sites' },
       { name: 'Clients',     icon: 'employees', href: '/reporting/clients' },
     ],
   },

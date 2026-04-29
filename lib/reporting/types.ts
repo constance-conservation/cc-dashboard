@@ -254,6 +254,27 @@ export type InspectionsListData = {
   generatedAt: string
 }
 
+// ─── E14: Global Sites view ─────────────────────────────────────────
+
+export type SiteWithStats = {
+  id: string
+  name: string
+  siteType: string | null
+  projectCode: string | null
+  inspectionCount: number
+  hours: number
+}
+
+export type SitesGlobalData = {
+  sites: SiteWithStats[]
+  totalSites: number
+  sitesWithInspections: number
+  mostActiveName: string | null
+  mostActiveCount: number
+  totalHours: number
+  generatedAt: string
+}
+
 // ─── E12: Pipeline Health ───────────────────────────────────────────
 
 export type PipelineIssueRow = {
