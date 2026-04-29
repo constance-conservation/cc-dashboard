@@ -174,6 +174,94 @@ function SiteSearchDropdown({ linkedIds, allOrgSites, onLink, onCreateAndLink }:
   )
 }
 
+// ── AllocationSpreadPanel ─────────────────────────────────────────────────────
+
+function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, customAllocs, onCustomAllocsChange }: {
+  strategy: AllocationStrategy
+  months: string[]
+  totalAllocation: number
+  unit: WorkUnit
+  customAllocs: Record<string, number>
+  onCustomAllocsChange?: (allocs: Record<string, number>) => void
+}) {
+  const monthLabel = (m: string) => {
+    const [y, mo] = m.split('-')
+    return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })
+  }
+
+  if (months.length === 0) {
+    return <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>Set start and end dates to see allocation spread</div>
+  }
+
+  if (strategy === 'even') {
+    const perMonth = totalAllocation > 0 ? Math.round((totalAllocation / months.length) * 10) / 10 : 0
+    return (
+      <div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
+          {perMonth} {unit} / month × {months.length} months
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 4 }}>
+          {months.map(m => (
+            <div key={m} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', background: 'var(--bg-sunken)', borderRadius: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>{monthLabel(m)}</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', marginLeft: 6 }}>{perMonth}</span>
+            </div>
+          ))}
+        </div>
+        {totalAllocation > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--line)', fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+            Total: {totalAllocation} {unit}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const total = months.reduce((s, m) => s + (customAllocs[m] ?? 0), 0)
+  return (
+    <div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
+        Monthly allocation
+      </div>
+      {months.map(m => (
+        <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <div style={{ width: 80, fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{monthLabel(m)}</div>
+          <NumericInput className="input" style={{ width: 80 }} min={0}
+            value={customAllocs[m] ?? 0}
+            onChange={v => onCustomAllocsChange?.({ ...customAllocs, [m]: v })} />
+          <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{unit}</span>
+        </div>
+      ))}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)', fontSize: 12 }}>
+        <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>Total allocated</span>
+        <span style={{ fontWeight: 600, color: total === totalAllocation ? 'var(--accent)' : 'var(--warn)' }}>
+          {total} / {totalAllocation} {unit}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// ── SpreadToggleButton ─────────────────────────────────────────────────────────
+
+function SpreadToggleButton({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      padding: '7px 10px', borderRadius: 8, fontSize: 11, cursor: 'pointer', flexShrink: 0,
+      fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em',
+      background: open ? 'var(--accent-soft)' : 'var(--bg-sunken)',
+      color: open ? 'var(--accent)' : 'var(--ink-3)',
+      border: '1px solid ' + (open ? 'var(--accent)' : 'var(--line)'),
+      display: 'flex', alignItems: 'center', gap: 4,
+    }}>
+      Spread
+      <svg width="9" height="9" viewBox="0 0 10 10" fill="none" style={{ transition: 'transform 0.15s', transform: open ? 'rotate(180deg)' : 'none' }}>
+        <path d="M1 3l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
+  )
+}
+
 // ── ActivityTypeahead ──────────────────────────────────────────────────────────
 
 function ActivityTypeahead({ value, displayName, activityTypes, onChange, onAddNew }: {
@@ -306,6 +394,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
     existing ? { ...existing } : emptyActivity(projectId, sites[0]?.id, project?.start ?? '', project?.end ?? '')
   )
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [showSpread, setShowSpread] = useState(existing?.allocationStrategy === 'custom')
   const [pendingTypeName, setPendingTypeName] = useState<string | null>(null)
   const [customAllocs, setCustomAllocs] = useState<Record<string, number>>(() => {
     if (!activityId) return {}
@@ -313,6 +402,10 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
       state.allocations.filter(a => a.activityId === activityId).map(a => [a.period, a.allocation])
     )
   })
+
+  useEffect(() => {
+    if (form.allocationStrategy === 'custom') setShowSpread(true)
+  }, [form.allocationStrategy])
 
   useEffect(() => {
     if (!pendingTypeName) return
@@ -409,58 +502,39 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
               <InfoTooltip text="Even spread: total units distributed evenly across the date range. Custom: set a specific amount per calendar month." />
             </span>
           }>
-            <Select value={form.allocationStrategy}
-              onChange={v => setForm({ ...form, allocationStrategy: v as AllocationStrategy })}
-              options={ALLOCATION_OPTIONS} />
+            <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ flex: 1 }}>
+                <Select value={form.allocationStrategy}
+                  onChange={v => setForm({ ...form, allocationStrategy: v as AllocationStrategy })}
+                  options={ALLOCATION_OPTIONS} />
+              </div>
+              <SpreadToggleButton open={showSpread} onClick={() => setShowSpread(s => !s)} />
+            </div>
           </Field>
         </div>
+
+        {showSpread && (
+          <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: -2, marginBottom: 4 }}>
+            <AllocationSpreadPanel
+              strategy={form.allocationStrategy}
+              months={monthsBetween(form.start, form.end)}
+              totalAllocation={form.totalAllocation}
+              unit={form.unit}
+              customAllocs={customAllocs}
+              onCustomAllocsChange={setCustomAllocs}
+            />
+            {form.allocationStrategy === 'custom' && !existing && (
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 8 }}>
+                Monthly allocations will be saved after you create the activity and reopen it.
+              </div>
+            )}
+          </div>
+        )}
 
         <Field label={`Total ${form.unit}`}>
           <NumericInput className="input" value={form.totalAllocation}
             onChange={v => setForm({ ...form, totalAllocation: v })} min={0} />
         </Field>
-
-        {form.allocationStrategy === 'custom' && (
-          <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: 4, marginBottom: 10 }}>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
-              Monthly allocation
-            </div>
-            {!form.start || !form.end ? (
-              <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>Set start and end dates to configure monthly allocation</div>
-            ) : (() => {
-              const months = monthsBetween(form.start, form.end)
-              const total = months.reduce((s, m) => s + (customAllocs[m] ?? 0), 0)
-              return (
-                <>
-                  {months.map(m => {
-                    const [y, mo] = m.split('-')
-                    const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })
-                    return (
-                      <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                        <div style={{ width: 80, fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{label}</div>
-                        <NumericInput className="input" style={{ width: 80 }} min={0}
-                          value={customAllocs[m] ?? 0}
-                          onChange={v => setCustomAllocs(prev => ({ ...prev, [m]: v }))} />
-                        <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{form.unit}</span>
-                      </div>
-                    )
-                  })}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)', fontSize: 12 }}>
-                    <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>Total allocated</span>
-                    <span style={{ fontWeight: 600, color: total === form.totalAllocation ? 'var(--accent)' : 'var(--warn)' }}>
-                      {total} / {form.totalAllocation} {form.unit}
-                    </span>
-                  </div>
-                  {!existing && (
-                    <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>
-                      Monthly allocations will be saved after you create the activity and reopen it.
-                    </div>
-                  )}
-                </>
-              )
-            })()}
-          </div>
-        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Field label={
@@ -797,6 +871,8 @@ function AddProjectModal({ state, onClose }: {
   const [pendingActivities, setPendingActivities] = useState<PendingActivity[]>([])
   const [showActivityForm, setShowActivityForm] = useState(false)
   const [expandedActivityIdx, setExpandedActivityIdx] = useState<number | null>(null)
+  const [showExpandedSpread, setShowExpandedSpread] = useState(false)
+  const [showNewActivitySpread, setShowNewActivitySpread] = useState(false)
   const [activityForm, setActivityForm] = useState<PendingActivity>({
     name: '', activityTypeId: undefined, siteKey: '', priority: 'medium', unit: 'days',
     allocationStrategy: 'even', totalAllocation: 0, customAllocs: {}, crewSizeType: 'fixed',
@@ -1108,11 +1184,31 @@ function AddProjectModal({ state, onClose }: {
                       options={UNIT_OPTIONS} />
                   </Field>
                   <Field label="Allocation strategy">
-                    <Select value={a.allocationStrategy}
-                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, allocationStrategy: v as AllocationStrategy } : x))}
-                      options={ALLOCATION_OPTIONS} />
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <div style={{ flex: 1 }}>
+                        <Select value={a.allocationStrategy}
+                          onChange={v => {
+                            setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, allocationStrategy: v as AllocationStrategy } : x))
+                            if (v === 'custom') setShowExpandedSpread(true)
+                          }}
+                          options={ALLOCATION_OPTIONS} />
+                      </div>
+                      <SpreadToggleButton open={showExpandedSpread} onClick={() => setShowExpandedSpread(s => !s)} />
+                    </div>
                   </Field>
                 </div>
+                {showExpandedSpread && (
+                  <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: -2 }}>
+                    <AllocationSpreadPanel
+                      strategy={a.allocationStrategy}
+                      months={monthsBetween(p.start, p.end)}
+                      totalAllocation={a.totalAllocation}
+                      unit={a.unit}
+                      customAllocs={a.customAllocs ?? {}}
+                      onCustomAllocsChange={allocs => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, customAllocs: allocs } : x))}
+                    />
+                  </div>
+                )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <Field label={`Total ${a.unit}`}>
                     <NumericInput className="input" value={a.totalAllocation}
@@ -1123,43 +1219,6 @@ function AddProjectModal({ state, onClose }: {
                       onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, minCrew: v } : x))} min={1} />
                   </Field>
                 </div>
-                {a.allocationStrategy === 'custom' && (
-                  <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px' }}>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
-                      Monthly allocation
-                    </div>
-                    {!p.start || !p.end ? (
-                      <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>Set project start and end dates to configure monthly allocation</div>
-                    ) : (() => {
-                      const months = monthsBetween(p.start, p.end)
-                      const allocs = a.customAllocs ?? {}
-                      const total = months.reduce((s, m) => s + (allocs[m] ?? 0), 0)
-                      return (
-                        <>
-                          {months.map(m => {
-                            const [y, mo] = m.split('-')
-                            const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })
-                            return (
-                              <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                                <div style={{ width: 80, fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{label}</div>
-                                <NumericInput className="input" style={{ width: 80 }} min={0}
-                                  value={allocs[m] ?? 0}
-                                  onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, customAllocs: { ...(x.customAllocs ?? {}), [m]: v } } : x))} />
-                                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{a.unit}</span>
-                              </div>
-                            )
-                          })}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)', fontSize: 12 }}>
-                            <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>Total allocated</span>
-                            <span style={{ fontWeight: 600, color: total === a.totalAllocation ? 'var(--accent)' : 'var(--warn)' }}>
-                              {total} / {a.totalAllocation} {a.unit}
-                            </span>
-                          </div>
-                        </>
-                      )
-                    })()}
-                  </div>
-                )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <Field label="Charge-out rate ($)">
                     <NumericInput className="input" value={a.chargeOutRate}
@@ -1238,11 +1297,31 @@ function AddProjectModal({ state, onClose }: {
                   options={UNIT_OPTIONS} />
               </Field>
               <Field label="Allocation strategy">
-                <Select value={activityForm.allocationStrategy}
-                  onChange={v => setActivityForm({ ...activityForm, allocationStrategy: v as AllocationStrategy })}
-                  options={ALLOCATION_OPTIONS} />
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ flex: 1 }}>
+                    <Select value={activityForm.allocationStrategy}
+                      onChange={v => {
+                        setActivityForm({ ...activityForm, allocationStrategy: v as AllocationStrategy })
+                        if (v === 'custom') setShowNewActivitySpread(true)
+                      }}
+                      options={ALLOCATION_OPTIONS} />
+                  </div>
+                  <SpreadToggleButton open={showNewActivitySpread} onClick={() => setShowNewActivitySpread(s => !s)} />
+                </div>
               </Field>
             </div>
+            {showNewActivitySpread && (
+              <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: -2, marginBottom: 4 }}>
+                <AllocationSpreadPanel
+                  strategy={activityForm.allocationStrategy}
+                  months={monthsBetween(p.start, p.end)}
+                  totalAllocation={activityForm.totalAllocation}
+                  unit={activityForm.unit}
+                  customAllocs={activityForm.customAllocs}
+                  onCustomAllocsChange={allocs => setActivityForm({ ...activityForm, customAllocs: allocs })}
+                />
+              </div>
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <Field label={`Total ${activityForm.unit}`}>
                 <NumericInput className="input" value={activityForm.totalAllocation}
@@ -1253,42 +1332,6 @@ function AddProjectModal({ state, onClose }: {
                   onChange={v => setActivityForm({ ...activityForm, minCrew: v })} min={1} />
               </Field>
             </div>
-            {activityForm.allocationStrategy === 'custom' && (
-              <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginBottom: 10 }}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 10 }}>
-                  Monthly allocation
-                </div>
-                {!p.start || !p.end ? (
-                  <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>Set project start and end dates to configure monthly allocation</div>
-                ) : (() => {
-                  const months = monthsBetween(p.start, p.end)
-                  const total = months.reduce((s, m) => s + (activityForm.customAllocs[m] ?? 0), 0)
-                  return (
-                    <>
-                      {months.map(m => {
-                        const [y, mo] = m.split('-')
-                        const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })
-                        return (
-                          <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                            <div style={{ width: 80, fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{label}</div>
-                            <NumericInput className="input" style={{ width: 80 }} min={0}
-                              value={activityForm.customAllocs[m] ?? 0}
-                              onChange={v => setActivityForm({ ...activityForm, customAllocs: { ...activityForm.customAllocs, [m]: v } })} />
-                            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{activityForm.unit}</span>
-                          </div>
-                        )
-                      })}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)', fontSize: 12 }}>
-                        <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>Total allocated</span>
-                        <span style={{ fontWeight: 600, color: total === activityForm.totalAllocation ? 'var(--accent)' : 'var(--warn)' }}>
-                          {total} / {activityForm.totalAllocation} {activityForm.unit}
-                        </span>
-                      </div>
-                    </>
-                  )
-                })()}
-              </div>
-            )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <Field label="Charge-out rate ($)">
                 <NumericInput className="input" value={activityForm.chargeOutRate}
