@@ -197,10 +197,12 @@ function DayEditor({ day, ym, state, onClose }: {
   const assignments = state.roster[dKey] || []
   const update      = (next: RosterAssignment[]) => state.updateDay(dKey, next)
 
-  const [search,    setSearch]    = useState('')
-  const [addingTo,  setAddingTo]  = useState<string | null>(null)
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const [actSearch, setActSearch] = useState<Record<string, string>>({})
+  const [search,       setSearch]       = useState('')
+  const [addingTo,     setAddingTo]     = useState<string | null>(null)
+  const [collapsed,    setCollapsed]    = useState<Set<string>>(new Set())
+  const [actSearch,    setActSearch]    = useState<Record<string, string>>({})
+  const [dropdownOpen, setDropdownOpen] = useState<Record<string, boolean>>({})
+  const [manuallyAdded, setManuallyAdded] = useState<Set<string>>(new Set())
 
   const available       = state.employees.filter(e => e.availability[wdName as keyof typeof e.availability])
   const assignedIds     = new Set(assignments.map(a => a.employeeId))
@@ -212,6 +214,7 @@ function DayEditor({ day, ym, state, onClose }: {
     [state.projects, state.activities, dayDate.toISOString()]
   )
   const assignedProjectIds = new Set(assignments.map(a => a.projectId))
+  const allAssignedIds = new Set([...assignedProjectIds, ...manuallyAdded])
   const extraProjects = state.projects.filter(
     p => assignedProjectIds.has(p.id) && !projectsForDay.find(ap => ap.id === p.id)
   )
@@ -263,12 +266,12 @@ function DayEditor({ day, ym, state, onClose }: {
       )}
 
       {/* Section 1: Assigned projects */}
-      {assignedProjectIds.size > 0 && (
+      {allAssignedIds.size > 0 && (
         <>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
-            Assigned ({assignedProjectIds.size})
+            Assigned ({allAssignedIds.size})
           </div>
-          {[...assignedProjectIds].map(pid => {
+          {[...allAssignedIds].map(pid => {
             const project = state.projects.find(p => p.id === pid)
             if (!project) return null
             const projAssignments = assignments.filter(a => a.projectId === pid)
@@ -295,16 +298,13 @@ function DayEditor({ day, ym, state, onClose }: {
                   <button
                     className="btn"
                     style={{ fontSize: 11, padding: '3px 10px', height: 26, flexShrink: 0, color: 'var(--danger)', borderColor: 'var(--danger)' }}
-                    onClick={() => update(assignments.filter(a => a.projectId !== pid))}
+                    onClick={() => {
+                      update(assignments.filter(a => a.projectId !== pid))
+                      setManuallyAdded(prev => { const n = new Set(prev); n.delete(pid); return n })
+                      if (addingTo === pid) setAddingTo(null)
+                    }}
                   >
                     Remove
-                  </button>
-                  <button
-                    className="btn"
-                    style={{ fontSize: 11, padding: '3px 10px', height: 26, flexShrink: 0 }}
-                    onClick={() => setAddingTo(addingTo === pid ? null : pid)}
-                  >
-                    + Add
                   </button>
                 </div>
 
@@ -315,6 +315,7 @@ function DayEditor({ day, ym, state, onClose }: {
                       const emp = state.employees.find(x => x.id === a.employeeId)
                       if (!emp) return null
                       const query = actSearch[a.employeeId] ?? ''
+                      const isOpen = !!dropdownOpen[a.employeeId]
                       const filteredOpts = actOpts.filter(o => o.label.toLowerCase().includes(query.toLowerCase()))
                       return (
                         <div key={a.employeeId} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '9px 12px', background: 'var(--bg-elev)', borderTop: '1px solid var(--line)' }}>
@@ -325,16 +326,18 @@ function DayEditor({ day, ym, state, onClose }: {
                             <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
                             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{emp.role}</div>
                             {actOpts.length > 0 && (
-                              <div style={{ marginTop: 5 }}>
+                              <div style={{ marginTop: 5, position: 'relative' }}>
                                 <input
                                   className="input"
                                   placeholder="Search activity…"
                                   value={query}
                                   onChange={ev => setActSearch(prev => ({ ...prev, [a.employeeId]: ev.target.value }))}
-                                  style={{ fontSize: 11, width: '100%', marginBottom: 3 }}
+                                  onFocus={() => setDropdownOpen(prev => ({ ...prev, [a.employeeId]: true }))}
+                                  onBlur={() => setTimeout(() => setDropdownOpen(prev => ({ ...prev, [a.employeeId]: false })), 150)}
+                                  style={{ fontSize: 11, width: '100%' }}
                                 />
-                                {filteredOpts.length > 0 && (query || a.activityId) && (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                {isOpen && filteredOpts.length > 0 && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginTop: 3 }}>
                                     {filteredOpts.map(opt => (
                                       <button
                                         key={opt.value}
@@ -344,7 +347,12 @@ function DayEditor({ day, ym, state, onClose }: {
                                           color: a.activityId === opt.value ? 'var(--accent)' : 'var(--ink-2)',
                                           border: 'none', width: '100%',
                                         }}
-                                        onClick={() => { changeActivity(a.employeeId, opt.value); setActSearch(prev => ({ ...prev, [a.employeeId]: opt.label })) }}
+                                        onMouseDown={e => e.preventDefault()}
+                                        onClick={() => {
+                                          changeActivity(a.employeeId, opt.value)
+                                          setActSearch(prev => ({ ...prev, [a.employeeId]: opt.label }))
+                                          setDropdownOpen(prev => ({ ...prev, [a.employeeId]: false }))
+                                        }}
                                       >
                                         {opt.label}
                                       </button>
@@ -362,7 +370,18 @@ function DayEditor({ day, ym, state, onClose }: {
                       )
                     })}
 
-                    {/* Staff picker — shows when addingTo === pid */}
+                    {/* + Add staff button and picker */}
+                    {addingTo !== pid && (
+                      <div style={{ padding: '8px 12px', borderTop: projAssignments.length > 0 ? '1px solid var(--line)' : undefined, background: 'var(--bg-elev)' }}>
+                        <button
+                          className="btn"
+                          style={{ fontSize: 11, padding: '3px 10px', height: 26 }}
+                          onClick={() => setAddingTo(pid)}
+                        >
+                          + Add staff
+                        </button>
+                      </div>
+                    )}
                     {addingTo === pid && (
                       <div style={{ borderTop: '1px solid var(--line)' }}>
                         {unassignedAvail.length === 0 ? (
@@ -401,13 +420,13 @@ function DayEditor({ day, ym, state, onClose }: {
       <input className="input" placeholder="Search projects…" value={search}
         onChange={e => setSearch(e.target.value)} style={{ width: '100%', marginBottom: 10 }} />
 
-      {filtered.filter(p => !assignedProjectIds.has(p.id)).length === 0 && (
+      {filtered.filter(p => !allAssignedIds.has(p.id)).length === 0 && (
         <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
-          {search ? 'No projects match.' : assignedProjectIds.size > 0 ? 'All active projects assigned.' : 'No active projects on this day.'}
+          {search ? 'No projects match.' : allAssignedIds.size > 0 ? 'All active projects assigned.' : 'No active projects on this day.'}
         </div>
       )}
 
-      {filtered.filter(p => !assignedProjectIds.has(p.id)).map(project => (
+      {filtered.filter(p => !allAssignedIds.has(p.id)).map(project => (
         <div key={project.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--line)', borderRadius: 8, marginBottom: 6 }}>
           <div>
             <div style={{ fontSize: 13, fontWeight: 500 }}>{project.name}</div>
@@ -418,36 +437,12 @@ function DayEditor({ day, ym, state, onClose }: {
           <button
             className="btn primary"
             style={{ fontSize: 11, padding: '3px 10px', height: 26, flexShrink: 0 }}
-            onClick={() => setAddingTo(addingTo === project.id ? null : project.id)}
+            onClick={() => setManuallyAdded(prev => { const n = new Set(prev); n.add(project.id); return n })}
           >
-            {addingTo === project.id ? 'Cancel' : 'Add'}
+            Add
           </button>
         </div>
       ))}
-
-      {/* Staff picker for unassigned project */}
-      {addingTo && !assignedProjectIds.has(addingTo) && (
-        <div style={{ border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden', marginTop: -2, marginBottom: 8 }}>
-          {unassignedAvail.length === 0 ? (
-            <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)', background: 'var(--bg-elev)' }}>All available staff are already assigned.</div>
-          ) : (
-            unassignedAvail.map((emp, i) => (
-              <button key={emp.id} onClick={() => addStaff(emp.id, addingTo)}
-                style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', padding: '8px 12px', background: 'var(--bg-elev)', cursor: 'pointer', textAlign: 'left', borderTop: i > 0 ? '1px solid var(--line)' : 'none' }}>
-                <div className="staff-avatar" style={{ width: 26, height: 26, fontSize: 9, flexShrink: 0 }}>
-                  {emp.name.split(' ').map((x: string) => x[0]).join('')}
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 500 }}>{emp.name}</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    {emp.role}{emp.skills.length > 0 ? ' · ' + emp.skills.slice(0, 2).join(', ') : ''}
-                  </div>
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-      )}
     </Drawer>
   )
 }
