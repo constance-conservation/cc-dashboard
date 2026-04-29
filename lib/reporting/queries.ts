@@ -15,6 +15,13 @@ import type {
   ReportScope,
   ScopeContext,
   ReportDetail,
+  StaffData,
+  StaffRosterRow,
+  ChemicalsData,
+  ChemicalApplicationRecordRow,
+  ChemicalLookupCard,
+  SpeciesData,
+  SpeciesLookupCard,
 } from './types'
 
 const TOP_N = 8
@@ -489,5 +496,213 @@ export async function getReportDetail(id: string): Promise<ReportDetail | null> 
     siteName: site?.name ?? null,
     locationMaps: Array.isArray(client?.location_maps) ? client?.location_maps ?? null : null,
     createdAt: r.created_at,
+  }
+}
+
+// ─── E13: Operations — Staff & Hours ────────────────────────────────
+
+type RawStaff = { id: string; name: string; role: string | null; active: boolean | null }
+type RawPersonnel = {
+  staff_id: string | null
+  hours_worked: number | string | null
+  staff: { name?: string | null } | { name?: string | null }[] | null
+}
+
+function pickEmbedded<T>(v: T | T[] | null | undefined): T | null {
+  return Array.isArray(v) ? (v[0] ?? null) : (v ?? null)
+}
+
+export async function getStaffData(): Promise<StaffData> {
+  const supabase = await createClient()
+
+  const [staffRes, personnelRes] = await Promise.all([
+    supabase
+      .from('staff')
+      .select('id,name,role,active')
+      .order('name'),
+    supabase
+      .from('inspection_personnel')
+      .select('staff_id,staff(name),hours_worked')
+      .limit(5000),
+  ])
+
+  if (staffRes.error) throw new Error(`staff query failed: ${staffRes.error.message}`)
+  if (personnelRes.error) throw new Error(`inspection_personnel query failed: ${personnelRes.error.message}`)
+
+  const staff = (staffRes.data ?? []) as RawStaff[]
+  const personnel = (personnelRes.data ?? []) as RawPersonnel[]
+
+  const hoursByName: Record<string, number> = {}
+  const inspectionsByName: Record<string, number> = {}
+  for (const p of personnel) {
+    const embedded = pickEmbedded(p.staff)
+    const name = embedded?.name ?? 'Unknown'
+    const h = typeof p.hours_worked === 'number'
+      ? p.hours_worked
+      : parseFloat(p.hours_worked ?? '') || 0
+    hoursByName[name] = (hoursByName[name] ?? 0) + h
+    inspectionsByName[name] = (inspectionsByName[name] ?? 0) + 1
+  }
+
+  const totalHours = Object.values(hoursByName).reduce((s, h) => s + h, 0)
+  const activeStaff = staff.filter(s => s.active !== false).length
+
+  const sortedHours = Object.entries(hoursByName).sort((a, b) => b[1] - a[1])
+  const topPerformerName = sortedHours[0]?.[0] ?? null
+  const topPerformerHours = sortedHours[0] ? Math.round(sortedHours[0][1]) : 0
+
+  const hoursByStaff: LabelValue[] = sortedHours
+    .filter(([, h]) => h > 0)
+    .map(([label, value]) => ({ label, value: Math.round(value) }))
+
+  const roster: StaffRosterRow[] = staff.map(s => ({
+    id: s.id,
+    name: s.name,
+    role: s.role,
+    active: s.active !== false,
+    inspectionCount: inspectionsByName[s.name] ?? 0,
+    totalHours: Math.round(hoursByName[s.name] ?? 0),
+  }))
+
+  return {
+    totalStaff: staff.length,
+    activeStaff,
+    totalHours: Math.round(totalHours),
+    topPerformerName,
+    topPerformerHours,
+    hoursByStaff,
+    roster,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E13: Operations — Chemicals ────────────────────────────────────
+
+type RawInspectionChemical = { chemical_name_raw: string | null }
+type RawCarRecord = {
+  id: string
+  date: string | null
+  application_method: string | null
+  weather_general: string | null
+  sites: { name?: string | null } | { name?: string | null }[] | null
+}
+type RawChemicalLookup = { canonical_name: string; type: string | null; active_ingredient: string | null }
+
+export async function getChemicalsData(): Promise<ChemicalsData> {
+  const supabase = await createClient()
+
+  const [chemicalsRes, carRes, lookupRes] = await Promise.all([
+    supabase
+      .from('inspection_chemicals')
+      .select('chemical_name_raw')
+      .limit(5000),
+    supabase
+      .from('chemical_application_records')
+      .select('id,date,application_method,total_amount_sprayed_litres,weather_general,sites(name)')
+      .order('date', { ascending: false, nullsFirst: false })
+      .limit(500),
+    supabase
+      .from('chemical_lookup')
+      .select('canonical_name,type,active_ingredient')
+      .order('canonical_name'),
+  ])
+
+  if (chemicalsRes.error) throw new Error(`inspection_chemicals query failed: ${chemicalsRes.error.message}`)
+  if (carRes.error) throw new Error(`chemical_application_records query failed: ${carRes.error.message}`)
+  if (lookupRes.error) throw new Error(`chemical_lookup query failed: ${lookupRes.error.message}`)
+
+  const chemicals = (chemicalsRes.data ?? []) as RawInspectionChemical[]
+  const carRecords = (carRes.data ?? []) as RawCarRecord[]
+  const lookup = (lookupRes.data ?? []) as RawChemicalLookup[]
+
+  const counts = countBy(chemicals as unknown as Record<string, unknown>[], 'chemical_name_raw')
+  const top = topN(counts, 10)
+  const usageBars: LabelValue[] = top.map(t => ({ label: t.label, value: t.value }))
+
+  const recentApplications: ChemicalApplicationRecordRow[] = carRecords.slice(0, 6).map(r => {
+    const site = pickEmbedded(r.sites)
+    return {
+      id: r.id,
+      date: r.date,
+      siteName: site?.name ?? null,
+      applicationMethod: r.application_method,
+      weatherGeneral: r.weather_general,
+    }
+  })
+
+  const reference: ChemicalLookupCard[] = lookup.map(c => ({
+    canonicalName: c.canonical_name,
+    type: c.type,
+    activeIngredient: c.active_ingredient,
+    mentions: counts[c.canonical_name] ?? 0,
+  }))
+
+  const mostUsedName = top[0]?.label ?? null
+  const mostUsedMentions = top[0]?.value ?? 0
+
+  return {
+    chemicalRecords: chemicals.length,
+    uniqueChemicals: Object.keys(counts).length,
+    applicationRecords: carRecords.length,
+    mostUsedName,
+    mostUsedMentions,
+    usageBars,
+    recentApplications,
+    reference,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E13: Operations — Species ──────────────────────────────────────
+
+type RawInspectionWeed = { species_name_raw: string | null }
+type RawSpeciesLookup = {
+  canonical_name: string
+  scientific_name: string | null
+  species_type: string | null
+  category: string | null
+}
+
+export async function getSpeciesData(): Promise<SpeciesData> {
+  const supabase = await createClient()
+
+  const [weedsRes, lookupRes] = await Promise.all([
+    supabase
+      .from('inspection_weeds')
+      .select('species_name_raw')
+      .limit(5000),
+    supabase
+      .from('species_lookup')
+      .select('canonical_name,scientific_name,species_type,category')
+      .order('canonical_name'),
+  ])
+
+  if (weedsRes.error) throw new Error(`inspection_weeds query failed: ${weedsRes.error.message}`)
+  if (lookupRes.error) throw new Error(`species_lookup query failed: ${lookupRes.error.message}`)
+
+  const weeds = (weedsRes.data ?? []) as RawInspectionWeed[]
+  const lookup = (lookupRes.data ?? []) as RawSpeciesLookup[]
+
+  const counts = countBy(weeds as unknown as Record<string, unknown>[], 'species_name_raw')
+  const top = topN(counts, 15)
+  const frequencyBars: LabelValue[] = top.map(t => ({ label: t.label, value: t.value }))
+
+  const cards: SpeciesLookupCard[] = lookup.slice(0, 12).map(s => ({
+    canonicalName: s.canonical_name,
+    scientificName: s.scientific_name,
+    speciesType: s.species_type,
+    category: s.category,
+    sightings: counts[s.canonical_name] ?? 0,
+  }))
+
+  return {
+    totalSightings: weeds.length,
+    uniqueSpecies: Object.keys(counts).length,
+    referenceCount: lookup.length,
+    mostCommonName: top[0]?.label ?? null,
+    mostCommonSightings: top[0]?.value ?? 0,
+    frequencyBars,
+    cards,
+    generatedAt: new Date().toISOString(),
   }
 }
