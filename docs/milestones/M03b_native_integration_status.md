@@ -86,6 +86,8 @@ After round 4, M03b is at **fully editable + generation-capable** state. The rep
 
 Generate `CRON_SECRET` with `openssl rand -hex 32` and add via Vercel dashboard or `vercel env add CRON_SECRET`. The Vercel platform sends it as `Authorization: Bearer <CRON_SECRET>` on every cron invocation.
 
+> **Status (2026-04-29):** Peter is deferring the `CRON_SECRET` add — manual generation via the button works without it; only the daily cron is paused until it lands. Engineers running regression on the cron route will see 500 until then; safe to skip that one row of the checklist.
+
 **Storage:**
 - Bucket `reports` in Supabase project `ymcyunspmljaruodjpkd` is auto-created on the first generation call (private). No manual setup required.
 - DOCX object key shape: `<client_uuid>/<filename>.docx`. `client_reports.docx_url` is a 1-year signed URL into this bucket.
