@@ -29,8 +29,8 @@ Replace the standalone reporting app (`constance-reporting.vercel.app`) with nat
 | **E15** | Inline CRUD across reporting views | ✅ Merged 2026-04-29 (`f7e03aa`) |
 | **E12** | Pipeline Health page | ✅ Merged 2026-04-29 (`14cee96`) |
 | **E14** | Global Sites view + sub-nav entry | ✅ Merged 2026-04-29 (`e98d42c`) |
-| **E15b** | Add/delete sites + zones + new client | ✅ Merged 2026-04-29 (PR #42 — squash hash pending) |
-| **E16** | Generation pipeline (full port + tests + Vercel Cron) | ✅ Merged 2026-04-29 (PR #43 — squash hash pending) |
+| **E15b** | Add/delete sites + zones + new client | ✅ Merged 2026-04-29 (`5f332a1`, PR #42) |
+| **E16** | Generation pipeline (full port + tests + Vercel Cron) | ✅ Merged 2026-04-29 (`84bdbec`, PR #43) |
 | **E17** | Sync + webhook (Vercel Cron incremental) | ⏸ Queued — open question on plan still to resolve with Peter |
 | **E18** | Cutover — flip APPS card href, retire standalone | ⏸ Final brief |
 
@@ -45,8 +45,8 @@ After **E18**, standalone retired.
 ## Round 4 — merged 2026-04-29
 
 ```
-E15b add/delete clients/sites/zones        ✅ PR #42 (no shared-file overlap with E16)
-E16  generation pipeline + Vercel Cron     ✅ PR #43 (Server Actions in lib/reporting/generation/actions.ts to avoid actions.ts conflict)
+E15b add/delete clients/sites/zones        ✅ 5f332a1 (PR #42 — no shared-file overlap with E16)
+E16  generation pipeline + Vercel Cron     ✅ 84bdbec (PR #43 — Server Actions in lib/reporting/generation/actions.ts to avoid actions.ts conflict)
 ```
 
 Both executed in parallel `git worktree` directories. By design (executor briefs and orchestrator prompts) the two PRs share no files: E15b appends CRUD to existing page-level `actions.ts` files, E16 places its Server Actions in a new `lib/reporting/generation/actions.ts`. Zero merge conflicts.
