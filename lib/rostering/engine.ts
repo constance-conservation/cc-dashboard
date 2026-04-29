@@ -5,6 +5,7 @@ export { type WeatherMetric, type WeatherConstraint, type DailyWeather }
 export const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 export type DayKey = typeof DAY_KEYS[number]
 export const DAY_HOURS = 8
+const LEADERSHIP_ROLES = new Set(['Field Supervisor', 'Team Leader'])
 // Passed to autoGenerate for intelligent scheduling
 export type AutoGenerateOptions = {
   projects?: Array<{ id: string; lat?: number; lng?: number }>
@@ -48,6 +49,22 @@ export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: numb
 function calendarMonthsSpanned(actStart: Date, actEnd: Date): number {
   return (actEnd.getFullYear() - actStart.getFullYear()) * 12
     + (actEnd.getMonth() - actStart.getMonth()) + 1
+}
+
+// Returns a priority bonus based on how close an activity is to its deadline.
+export function deadlinePriorityBonus(a: Activity, rosterMonth: string): number {
+  if (!a.end) return 0
+  const [ry, rm] = rosterMonth.split('-').map(Number)
+  const rosterEnd = new Date(ry, rm, 0) // last day of roster month
+  const actEnd = parseDate(a.end)
+  const daysRemaining = Math.floor((actEnd.getTime() - rosterEnd.getTime()) / (1000 * 60 * 60 * 24))
+  const remaining = Math.max(0, a.totalAllocation - a.unitsCompleted)
+  if (remaining <= 0) return 0
+  if (daysRemaining <= 0)  return 4  // ends this month or overdue
+  if (daysRemaining <= 30) return 2  // ends next month
+  if (daysRemaining <= 60) return 1  // 2 months out
+  if (daysRemaining <= 90) return 0.5
+  return 0
 }
 
 // Returns unschedulable remainder hours when unit=hours and strategy=even.
@@ -152,6 +169,43 @@ export function detectUnderstaffing(
   return result
 }
 
+// Count how many days each activity was rostered in a given month.
+export function computeActivityMonthVisits(
+  roster: Record<string, RosterAssignment[]>,
+  rosterMonth: string,
+): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const [dKey, assignments] of Object.entries(roster)) {
+    if (!dKey.startsWith(rosterMonth)) continue
+    const seen = new Set<string>()
+    for (const a of assignments) {
+      if (a.activityId && !seen.has(a.activityId)) {
+        seen.add(a.activityId)
+        counts[a.activityId] = (counts[a.activityId] ?? 0) + 1
+      }
+    }
+  }
+  return counts
+}
+
+// Returns project IDs that have at least one activity under its monthly visit target.
+export function computeProjectShortfalls(
+  roster: Record<string, RosterAssignment[]>,
+  activities: Activity[],
+  allocations: ActivityAllocation[],
+  rosterMonth: string,
+): Set<string> {
+  const visits = computeActivityMonthVisits(roster, rosterMonth)
+  const result = new Set<string>()
+  for (const a of activities) {
+    if (a.status !== 'active') continue
+    const target = computeMonthlyTarget(a, rosterMonth, allocations)
+    if (target <= 0) continue
+    if ((visits[a.id] ?? 0) < target) result.add(a.projectId)
+  }
+  return result
+}
+
 // Activity-aware auto-generate roster for a month.
 export function autoGenerate(
   activities: Activity[],
@@ -190,9 +244,11 @@ export function autoGenerate(
   }
 
   const priorityScore: Record<string, number> = { high: 3, medium: 2, low: 1 }
-  const sorted = [...eligible].sort((a, b) =>
-    (priorityScore[b.priority] || 0) - (priorityScore[a.priority] || 0)
-  )
+  const sorted = [...eligible].sort((a, b) => {
+    const sa = (priorityScore[a.priority] || 0) + deadlinePriorityBonus(a, rosterMonth)
+    const sb = (priorityScore[b.priority] || 0) + deadlinePriorityBonus(b, rosterMonth)
+    return sb - sa
+  })
   const visitCount: Record<string, number> = {}
   eligible.forEach(a => { visitCount[a.id] = 0 })
 
@@ -292,21 +348,11 @@ export function autoGenerate(
       )
       if (avail.length === 0) return
 
-      const proximityPenalty = (emp: Employee, activity: Activity, opts: AutoGenerateOptions): number => {
-        if (emp.homeLat == null || emp.homeLng == null) return 0
-        const proj = opts.projects?.find(p => p.id === activity.projectId)
-        if (!proj?.lat || !proj?.lng) return 0
-        const km = haversineKm(emp.homeLat, emp.homeLng, proj.lat, proj.lng)
-        // Scale: 0 penalty at 0km, 0.3 penalty at 100km+
-        return Math.min(0.3, km / 333)
-      }
-
       const scored = avail.map(e => ({
         e,
         score: act.skills.filter(s => e.skills.includes(s)).length
-          + (e.role === 'Field Supervisor' ? 0.5 : 0)
-          - (empLoad[e.id] ?? 0) * 0.1  // penalise heavily-loaded employees
-          - proximityPenalty(e, act, options),
+          + (LEADERSHIP_ROLES.has(e.role) ? 2.0 : 0)
+          - (empLoad[e.id] ?? 0) * 0.1,
       })).sort((a, b) => b.score - a.score)
 
       const minNeeded  = act.crewSizeType === 'any' ? 1 : act.minCrew
@@ -317,11 +363,24 @@ export function autoGenerate(
       if (scored.length < minNeeded) return
 
       let hasSup = false
+      let hasLeader = false
       const chosen: Employee[] = []
       for (const { e } of scored) {
         if (chosen.length >= maxAllowed) break
-        if (e.role === 'Field Supervisor') { if (hasSup) continue; hasSup = true }
+        if (e.role === 'Field Supervisor') {
+          if (hasSup) continue  // at most one supervisor per project per day
+          hasSup = true; hasLeader = true
+        } else if (e.role === 'Team Leader') {
+          hasLeader = true
+        }
         chosen.push(e)
+      }
+      // If no leadership included and there's room, inject one
+      if (!hasLeader && chosen.length < maxAllowed) {
+        const leaderEntry = scored.find(({ e }) =>
+          !chosen.includes(e) && LEADERSHIP_ROLES.has(e.role) && !(e.role === 'Field Supervisor' && hasSup)
+        )
+        if (leaderEntry) { chosen.push(leaderEntry.e); hasLeader = true }
       }
       if (chosen.length < minNeeded) return
 

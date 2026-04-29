@@ -8,7 +8,7 @@ import { Drawer } from '@/components/dashboard/Drawer'
 import { NumericInput } from '@/components/dashboard/NumericInput'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import type { RosterAssignment, Activity, Employee, ActivityCarryover, CarryoverStatus } from '@/lib/types'
-import { DAY_KEYS, type DayKey, dateKey, weekdayIdx, weekdayName, parseDate, computeMonthlyTarget, detectUnderstaffing, autoGenerate, getProjectsWithActivitiesOnDay, type AutoGenerateOptions, type DailyWeather } from '@/lib/rostering/engine'
+import { DAY_KEYS, type DayKey, dateKey, weekdayIdx, weekdayName, parseDate, computeMonthlyTarget, detectUnderstaffing, autoGenerate, getProjectsWithActivitiesOnDay, computeProjectShortfalls, DAY_HOURS, type AutoGenerateOptions, type DailyWeather } from '@/lib/rostering/engine'
 
 function daysInMonth(ym: string) {
   const [y, m] = ym.split('-').map(Number)
@@ -140,9 +140,16 @@ function CalDay({ day, ym, state, onOpen }: {
           ? state.activities.find(a => a.id === activityId)
           : state.activities.find(a => a.projectId === pid && a.status === 'active')
         const crewSize = act?.crewSizeType !== 'any' ? (act?.minCrew ?? null) : null
+        const hasLeader = empIds.some(eid => {
+          const e = state.employees.find(x => x.id === eid)
+          return e && (e.role === 'Field Supervisor' || e.role === 'Team Leader')
+        })
         return (
           <div key={pid} className="cal-shift">
-            <div className="cal-shift-name">{p.name.split(' — ')[0]}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <div className="cal-shift-name" style={{ flex: 1, minWidth: 0 }}>{p.name.split(' — ')[0]}</div>
+              {!hasLeader && <span title="No supervisor or team leader assigned" style={{ fontSize: 8, color: '#d97706', flexShrink: 0 }}>⚠</span>}
+            </div>
             {activityId && act && (
               <div style={{ fontSize: 9, color: 'var(--ink-3)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {act.name}
@@ -153,12 +160,12 @@ function CalDay({ day, ym, state, onOpen }: {
                 {empIds.slice(0, 4).map((eid, i) => {
                   const e     = state.employees.find(x => x.id === eid)
                   if (!e) return null
-                  const isSup = e.role === 'Field Supervisor'
+                  const isLeader = e.role === 'Field Supervisor' || e.role === 'Team Leader'
                   return (
                     <div key={eid}
-                      className={`cal-avatar${isSup ? ' sup' : ''}`}
+                      className={`cal-avatar${isLeader ? ' sup' : ''}`}
                       style={{ marginLeft: i === 0 ? 0 : -5 }}
-                      title={`${e.name} · ${e.role}`}>
+                      title={`${e.name} · ${e.role || 'Field Worker'}`}>
                       {e.name.split(' ').map(x => x[0]).join('').slice(0, 2)}
                     </div>
                   )
@@ -281,8 +288,12 @@ function DayEditor({ day, ym, state, onClose }: {
                 && parseDate(a.start) <= dayDate && parseDate(a.end) >= dayDate)
               .map(a => ({ value: a.id, label: a.name }))
 
+            const hasLeader = projAssignments.some(a => {
+              const e = state.employees.find(x => x.id === a.employeeId)
+              return e && (e.role === 'Field Supervisor' || e.role === 'Team Leader')
+            })
             return (
-              <div key={pid} style={{ marginBottom: 8, border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden' }}>
+              <div key={pid} style={{ marginBottom: 8, border: `1px solid ${!hasLeader && projAssignments.length > 0 ? '#d97706' : 'var(--line)'}`, borderRadius: 8, overflow: 'hidden' }}>
                 {/* Collapsible header */}
                 <div style={{ display: 'flex', alignItems: 'center', padding: '9px 12px', background: 'var(--bg-sunken)', gap: 8 }}>
                   <button
@@ -294,6 +305,9 @@ function DayEditor({ day, ym, state, onClose }: {
                     <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
                       {projAssignments.length} staff
                     </span>
+                    {!hasLeader && projAssignments.length > 0 && (
+                      <span style={{ fontSize: 10, color: '#d97706', fontFamily: 'var(--font-mono)' }}>⚠ no supervisor</span>
+                    )}
                   </button>
                   <button
                     className="btn"
@@ -324,7 +338,7 @@ function DayEditor({ day, ym, state, onClose }: {
                           </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
-                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{emp.role}</div>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{emp.role || 'Field Worker'}</div>
                             {actOpts.length > 0 && (
                               <div style={{ marginTop: 5, position: 'relative' }}>
                                 <input
@@ -471,10 +485,11 @@ function RulesModal({ onClose }: { onClose: () => void }) {
 
 // ── Projects drawer ───────────────────────────────────────────────────────────
 
-function ProjectsDrawer({ state, rosterMonth, activityVisits, onClose }: {
+function ProjectsDrawer({ state, rosterMonth, activityVisits, shortfallProjectIds, onClose }: {
   state: ReturnType<typeof useCCState>
   rosterMonth: string
   activityVisits: Record<string, number>
+  shortfallProjectIds: Set<string>
   onClose: () => void
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -526,14 +541,15 @@ function ProjectsDrawer({ state, rosterMonth, activityVisits, onClose }: {
       {activeProjects.map(project => {
         const items      = projectActivities.get(project.id) ?? []
         const isExpanded = expanded.has(project.id)
+        const hasShortfall = shortfallProjectIds.has(project.id)
         return (
           <div key={project.id} style={{ marginBottom: 8 }}>
             <button
               onClick={() => toggle(project.id)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-                padding: '10px 12px', background: 'var(--bg-sunken)',
-                border: '1px solid var(--line)',
+                padding: '10px 12px', background: hasShortfall ? 'oklch(0.97 0.03 60)' : 'var(--bg-sunken)',
+                border: `1px solid ${hasShortfall ? '#d97706' : 'var(--line)'}`,
                 borderRadius: isExpanded ? '8px 8px 0 0' : 8,
                 cursor: 'pointer', textAlign: 'left',
               }}
@@ -545,10 +561,12 @@ function ProjectsDrawer({ state, rosterMonth, activityVisits, onClose }: {
               }}>▶</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 500 }}>{project.name}</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 2 }}>
-                  {items.length > 0
-                    ? `${items.length} activit${items.length !== 1 ? 'ies' : 'y'} scheduled`
-                    : 'No activities allocated this month'}
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: hasShortfall ? '#d97706' : 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 2 }}>
+                  {hasShortfall
+                    ? '⚠ activities under target this month'
+                    : items.length > 0
+                      ? `${items.length} activit${items.length !== 1 ? 'ies' : 'y'} scheduled`
+                      : 'No activities allocated this month'}
                 </div>
               </div>
             </button>
@@ -565,21 +583,29 @@ function ProjectsDrawer({ state, rosterMonth, activityVisits, onClose }: {
                     const overallPct   = act.totalAllocation > 0
                       ? Math.min(100, Math.round(act.unitsCompleted / act.totalAllocation * 100))
                       : 0
+                    const isUnder = monthVisits < target
+                    const monthLabel = act.unit === 'hours'
+                      ? `${monthVisits * DAY_HOURS}/${target * DAY_HOURS} hrs`
+                      : `${monthVisits}/${target} days`
                     return (
                       <div key={act.id} style={{
-                        padding: '12px 14px', background: 'var(--bg-elev)',
+                        padding: '12px 14px',
+                        background: isUnder ? 'oklch(0.99 0.015 60)' : 'var(--bg-elev)',
                         borderTop: i > 0 ? '1px solid var(--line)' : 'none',
                       }}>
-                        <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 10 }}>{act.name}</div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 10 }}>
+                          <span style={{ fontSize: 12, fontWeight: 500 }}>{act.name}</span>
+                          {isUnder && <span style={{ fontSize: 9, color: '#d97706', fontFamily: 'var(--font-mono)' }}>under target</span>}
+                        </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                           {/* This month */}
                           <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
                               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>This month</span>
-                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-2)' }}>{monthVisits}/{target} visits</span>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: isUnder ? '#d97706' : 'var(--ink-2)' }}>{monthLabel}</span>
                             </div>
-                            <div style={{ height: 3, background: 'var(--bg-sunken)', borderRadius: 2 }}>
-                              <div style={{ height: '100%', width: monthPct + '%', background: monthPct >= 100 ? 'var(--ok)' : 'var(--accent)', borderRadius: 2 }} />
+                            <div style={{ height: 4, background: 'var(--bg-sunken)', borderRadius: 2 }}>
+                              <div style={{ height: '100%', width: monthPct + '%', background: monthPct >= 100 ? 'var(--ok)' : isUnder ? '#d97706' : 'var(--accent)', borderRadius: 2, transition: 'width 0.3s' }} />
                             </div>
                           </div>
                           {/* Overall */}
@@ -588,8 +614,8 @@ function ProjectsDrawer({ state, rosterMonth, activityVisits, onClose }: {
                               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Overall</span>
                               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-2)' }}>{act.unitsCompleted}/{act.totalAllocation} {act.unit}</span>
                             </div>
-                            <div style={{ height: 3, background: 'var(--bg-sunken)', borderRadius: 2 }}>
-                              <div style={{ height: '100%', width: overallPct + '%', background: overallPct >= 100 ? 'var(--ok)' : 'var(--ink-3)', borderRadius: 2 }} />
+                            <div style={{ height: 4, background: 'var(--bg-sunken)', borderRadius: 2 }}>
+                              <div style={{ height: '100%', width: overallPct + '%', background: overallPct >= 100 ? 'var(--ok)' : 'var(--ink-3)', borderRadius: 2, transition: 'width 0.3s' }} />
                             </div>
                           </div>
                         </div>
@@ -643,8 +669,9 @@ export default function RosteringPage() {
         }
       })
     }
-    return { totalShifts, uniqueStaff: uniqueStaff.size, activityVisits }
-  }, [state.roster, state.rosterMonth])
+    const shortfallProjectIds = computeProjectShortfalls(state.roster, state.activities, state.allocations, state.rosterMonth)
+    return { totalShifts, uniqueStaff: uniqueStaff.size, activityVisits, shortfallProjectIds }
+  }, [state.roster, state.rosterMonth, state.activities, state.allocations])
 
   // ── Auto-generate helpers ──────────────────────────────────────────────────
 
@@ -901,6 +928,7 @@ export default function RosteringPage() {
           state={state}
           rosterMonth={state.rosterMonth}
           activityVisits={stats.activityVisits}
+          shortfallProjectIds={stats.shortfallProjectIds}
           onClose={() => setShowProjects(false)}
         />
       )}
