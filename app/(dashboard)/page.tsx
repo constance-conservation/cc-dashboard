@@ -10,7 +10,7 @@ import { createClient } from '@/lib/supabase/client'
 // ── App definitions ────────────────────────────────────────────
 const APPS_OPERATIONS = [
   { id: 'roster',    href: '/rostering',  name: 'Rostering',      icon: 'roster'    as const, desc: 'Monthly crew scheduling by project' },
-  { id: 'staff',     href: 'https://constance-reporting.vercel.app/', name: 'Staff Reporting', icon: 'staff' as const, desc: 'Daily reports, timesheets & incident logs' },
+  { id: 'staff',     href: '/reporting',                              name: 'Staff Reporting', icon: 'staff' as const, desc: 'Daily reports, timesheets & incident logs' },
   { id: 'tender',    href: '/tendering',  name: 'Tendering',      icon: 'tender'    as const, desc: 'Live bids, proposals & submissions', comingSoon: true },
 ]
 
