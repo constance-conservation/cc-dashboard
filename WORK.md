@@ -17,8 +17,8 @@
 ## Current Sprint
 
 ### Task 3 — Domain migration to app.constanceconservation.com.au
-**Branch:** `feat/activity-redesign`
-**Status:** In Progress
+**Branch:** `feat/allocation-spread-panel`
+**Status:** Complete
 
 **Goal:** Make `app.constanceconservation.com.au` canonical; redirect `cc-dashboard-rouge.vercel.app` → new domain.
 
@@ -85,6 +85,7 @@
 
 | Date | Task | Branch | PR |
 |---|---|---|---|
+| 2026-04-29 | Domain migration — canonical domain, Vercel redirect, Supabase auth config | feat/allocation-spread-panel | — |
 | 2026-04-29 | Activity redesign — form UX, alloc grid, site gate, typeahead, validation | feat/activity-redesign | #23–28 |
 | 2026-04-29 | Branch cleanup — deleted 11 stale local branches, pruned remote refs, cleared Vercel previews | n/a | n/a |
 

@@ -9,183 +9,17 @@ import { Select } from '@/components/dashboard/Select'
 import { NumericInput } from '@/components/dashboard/NumericInput'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import type { RosterAssignment, Activity, Employee, ActivityCarryover, CarryoverStatus } from '@/lib/types'
-
-const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
-type DayKey = typeof DAY_KEYS[number]
-const DAY_HOURS = 8
+import { DAY_KEYS, type DayKey, dateKey, weekdayIdx, weekdayName, computeMonthlyTarget, detectUnderstaffing, autoGenerate } from '@/lib/rostering/engine'
 
 function daysInMonth(ym: string) {
   const [y, m] = ym.split('-').map(Number)
   return new Date(y, m, 0).getDate()
 }
-function dateKey(ym: string, d: number) { return `${ym}-${String(d).padStart(2, '0')}` }
-function weekdayIdx(ym: string, d: number) {
-  const [y, m] = ym.split('-').map(Number)
-  return new Date(y, m - 1, d).getDay()
-}
-function weekdayName(ym: string, d: number): DayKey { return DAY_KEYS[weekdayIdx(ym, d)] }
 
 function prevMonthKey(ym: string): string {
   const [y, m] = ym.split('-').map(Number)
   const d = new Date(y, m - 2, 1)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-
-// ── Monthly visit target for a single activity in a given month ───────────────
-
-function computeMonthlyTarget(a: Activity, rosterMonth: string): number {
-  if (!a.start || !a.end) return 0
-  const [y, m] = rosterMonth.split('-').map(Number)
-  const monthStart = new Date(y, m - 1, 1)
-  const monthEnd   = new Date(y, m, 0)
-  const actStart   = new Date(a.start)
-  const actEnd     = new Date(a.end)
-  if (actStart > monthEnd || actEnd < monthStart) return 0
-
-  const totalDays   = Math.max(1, (actEnd.getTime() - actStart.getTime()) / 86400000)
-  const totalMonths = Math.max(1, totalDays / 30)
-  const remaining   = Math.max(0, a.totalAllocation - a.unitsCompleted)
-  return a.unit === 'days'
-    ? Math.max(1, Math.ceil(remaining / totalMonths))
-    : Math.max(1, Math.ceil(remaining / totalMonths / DAY_HOURS))
-}
-
-// ── Understaffing detection ───────────────────────────────────────────────────
-// Scans a month's roster for days where an activity had fewer crew than its minCrew.
-
-function detectUnderstaffing(
-  roster: Record<string, RosterAssignment[]>,
-  month: string,
-  activities: Activity[],
-  existingKeys: Set<string>,
-): Omit<ActivityCarryover, 'id' | 'createdAt'>[] {
-  const result: Omit<ActivityCarryover, 'id' | 'createdAt'>[] = []
-  const today = new Date().toISOString().slice(0, 10)
-
-  for (const [dKey, assignments] of Object.entries(roster)) {
-    if (!dKey.startsWith(month)) continue
-    const byActivity: Record<string, number> = {}
-    for (const a of assignments) {
-      if (a.activityId) byActivity[a.activityId] = (byActivity[a.activityId] ?? 0) + 1
-    }
-    for (const [actId, count] of Object.entries(byActivity)) {
-      const act = activities.find(a => a.id === actId)
-      if (!act || act.crewSizeType === 'any') continue
-      if (count < act.minCrew) {
-        const key = `${actId}:${dKey}`
-        if (!existingKeys.has(key)) {
-          result.push({
-            activityId: actId,
-            originalDateKey: dKey,
-            unitsMissed: 1,
-            status: 'pending',
-            reviewDate: today,
-          })
-        }
-      }
-    }
-  }
-  return result
-}
-
-// ── Activity-aware auto-generate ──────────────────────────────────────────────
-
-function autoGenerate(
-  activities: Activity[],
-  employees: Employee[],
-  rosterMonth: string,
-  approvedActivityIds: Set<string>,
-): Record<string, RosterAssignment[]> {
-  const [y, m] = rosterMonth.split('-').map(Number)
-  const monthStart = new Date(y, m - 1, 1)
-  const monthEnd   = new Date(y, m, 0)
-  const n          = monthEnd.getDate()
-
-  const eligible = activities.filter(a => {
-    if (a.status !== 'active' || !a.start || !a.end) return false
-    return new Date(a.start) <= monthEnd && new Date(a.end) >= monthStart
-  })
-  if (eligible.length === 0) return {}
-
-  const visitTargets: Record<string, number> = {}
-  eligible.forEach(a => {
-    const base = computeMonthlyTarget(a, rosterMonth)
-    visitTargets[a.id] = base + (approvedActivityIds.has(a.id) ? 1 : 0)
-  })
-
-  const hasSat = employees.some(e => e.availability.sat)
-  const days: number[] = []
-  for (let d = 1; d <= n; d++) {
-    const wd = weekdayIdx(rosterMonth, d)
-    if (wd === 0) continue
-    if (wd === 6 && !hasSat) continue
-    days.push(d)
-  }
-
-  const priorityScore: Record<string, number> = { high: 3, medium: 2, low: 1 }
-  const sorted = [...eligible].sort((a, b) =>
-    (priorityScore[b.priority] || 0) - (priorityScore[a.priority] || 0)
-  )
-  const visitCount: Record<string, number> = {}
-  eligible.forEach(a => { visitCount[a.id] = 0 })
-
-  const newRoster: Record<string, RosterAssignment[]> = {}
-
-  days.forEach((d, dayIdx) => {
-    const dKey   = dateKey(rosterMonth, d)
-    const wdName = weekdayName(rosterMonth, d)
-    const assignments: RosterAssignment[] = []
-    const usedIds = new Set<string>()
-
-    sorted.forEach(act => {
-      const target   = visitTargets[act.id] ?? 0
-      const current  = visitCount[act.id] ?? 0
-      const expected = Math.ceil((dayIdx + 1) / days.length * target)
-      if (current >= target || current >= expected) return
-
-      const avail = employees.filter(
-        e => e.availability[wdName as keyof typeof e.availability] && !usedIds.has(e.id)
-      )
-      if (avail.length === 0) return
-
-      const scored = avail.map(e => ({
-        e,
-        score: act.skills.filter(s => e.skills.includes(s)).length
-          + (e.role === 'Field Supervisor' ? 0.5 : 0),
-      })).sort((a, b) => b.score - a.score)
-
-      const minNeeded  = act.crewSizeType === 'any' ? 1 : act.minCrew
-      const maxAllowed = act.crewSizeType === 'range' && act.maxCrew
-        ? act.maxCrew
-        : act.crewSizeType === 'any' ? avail.length : act.minCrew
-
-      if (scored.length < minNeeded) return
-
-      let hasSup = false
-      const chosen: Employee[] = []
-      for (const { e } of scored) {
-        if (chosen.length >= maxAllowed) break
-        if (e.role === 'Field Supervisor') { if (hasSup) continue; hasSup = true }
-        chosen.push(e)
-      }
-      if (chosen.length < minNeeded) return
-
-      chosen.forEach(e => {
-        usedIds.add(e.id)
-        assignments.push({
-          employeeId: e.id,
-          projectId:  act.projectId,
-          activityId: act.id,
-          siteId:     act.siteId,
-        })
-      })
-      visitCount[act.id] = (visitCount[act.id] ?? 0) + 1
-    })
-
-    if (assignments.length > 0) newRoster[dKey] = assignments
-  })
-
-  return newRoster
 }
 
 // ── Carryover review ──────────────────────────────────────────────────────────
@@ -590,7 +424,7 @@ export default function RosteringPage() {
   // ── Auto-generate helpers ──────────────────────────────────────────────────
 
   function runAutoGenerate(approvedActivityIds: Set<string>) {
-    const generated = autoGenerate(state.activities, state.employees, state.rosterMonth, approvedActivityIds)
+    const generated = autoGenerate(state.activities, state.employees, state.rosterMonth, approvedActivityIds, state.allocations)
     const newRoster = { ...state.roster }
     Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
     Object.assign(newRoster, generated)
