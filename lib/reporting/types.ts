@@ -253,3 +253,32 @@ export type InspectionsListData = {
   shown: number
   generatedAt: string
 }
+
+// ─── E12: Pipeline Health ───────────────────────────────────────────
+
+export type PipelineIssueRow = {
+  id: string
+  auditId: string | null
+  date: string | null
+  templateType: InspectionTemplateType
+  status: ProcessingStatus
+}
+
+export type SyncState = {
+  syncType: string | null
+  lastSyncAt: string | null
+  lastModifiedAfter: string | null
+  highWaterMark: string | null
+  lastCursor: string | null
+  totalSynced: number
+  lastError: string | null
+}
+
+export type PipelineHealthData = {
+  totalInspections: number
+  statusCounts: StatusCounts
+  templateBars: LabelValue[]
+  issues: PipelineIssueRow[]
+  syncState: SyncState | null
+  generatedAt: string
+}
