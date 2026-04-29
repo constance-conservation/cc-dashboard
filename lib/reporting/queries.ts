@@ -22,6 +22,10 @@ import type {
   ChemicalLookupCard,
   SpeciesData,
   SpeciesLookupCard,
+  InspectionRow,
+  InspectionsListData,
+  InspectionTemplateType,
+  ProcessingStatus,
 } from './types'
 
 const TOP_N = 8
@@ -703,6 +707,116 @@ export async function getSpeciesData(): Promise<SpeciesData> {
     mostCommonSightings: top[0]?.value ?? 0,
     frequencyBars,
     cards,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E11: Inspections list ──────────────────────────────────────────
+
+const INSPECTION_LIST_LIMIT = 2000
+const INSPECTION_TABLE_ROWS = 50
+const INSPECTION_AGG_LIMIT = 5000
+
+const KNOWN_PROCESSING_STATUSES: ReadonlySet<ProcessingStatus> = new Set([
+  'completed', 'needs_review', 'failed', 'processing', 'pending', 'unknown',
+])
+
+function asProcessingStatus(s: string | null | undefined): ProcessingStatus {
+  if (!s) return 'unknown'
+  return KNOWN_PROCESSING_STATUSES.has(s as ProcessingStatus) ? (s as ProcessingStatus) : 'unknown'
+}
+
+function flattenEmbedded<T>(v: T | T[] | null | undefined): T | null {
+  if (Array.isArray(v)) return v[0] ?? null
+  return v ?? null
+}
+
+export async function getInspectionsListData(): Promise<InspectionsListData> {
+  const supabase = await createClient()
+
+  const [inspectionsRes, tasksRes, weedsRes, mediaRes] = await Promise.all([
+    supabase
+      .from('inspections')
+      .select('id, date, site_id, supervisor_id, sc_template_type, processing_status, sites(name), staff(name)')
+      .order('date', { ascending: false, nullsFirst: false })
+      .limit(INSPECTION_LIST_LIMIT),
+    supabase.from('inspection_tasks').select('inspection_id').limit(INSPECTION_AGG_LIMIT),
+    supabase.from('inspection_weeds').select('inspection_id').limit(INSPECTION_AGG_LIMIT),
+    supabase.from('inspection_media').select('inspection_id').limit(INSPECTION_AGG_LIMIT),
+  ])
+
+  if (inspectionsRes.error) throw new Error(`inspections query failed: ${inspectionsRes.error.message}`)
+  if (tasksRes.error) throw new Error(`inspection_tasks query failed: ${tasksRes.error.message}`)
+  if (weedsRes.error) throw new Error(`inspection_weeds query failed: ${weedsRes.error.message}`)
+  if (mediaRes.error) throw new Error(`inspection_media query failed: ${mediaRes.error.message}`)
+
+  type RawInspection = {
+    id: string
+    date: string | null
+    site_id: string | null
+    supervisor_id: string | null
+    sc_template_type: string
+    processing_status: string | null
+    sites: { name?: string | null } | { name?: string | null }[] | null
+    staff: { name?: string | null } | { name?: string | null }[] | null
+  }
+  type RawAgg = { inspection_id: string | null }
+
+  const inspections = (inspectionsRes.data ?? []) as RawInspection[]
+  const tasks = (tasksRes.data ?? []) as RawAgg[]
+  const weeds = (weedsRes.data ?? []) as RawAgg[]
+  const media = (mediaRes.data ?? []) as RawAgg[]
+
+  const taskCounts = new Map<string, number>()
+  for (const t of tasks) {
+    if (!t.inspection_id) continue
+    taskCounts.set(t.inspection_id, (taskCounts.get(t.inspection_id) ?? 0) + 1)
+  }
+  const weedCounts = new Map<string, number>()
+  for (const w of weeds) {
+    if (!w.inspection_id) continue
+    weedCounts.set(w.inspection_id, (weedCounts.get(w.inspection_id) ?? 0) + 1)
+  }
+  const photoCounts = new Map<string, number>()
+  for (const m of media) {
+    if (!m.inspection_id) continue
+    photoCounts.set(m.inspection_id, (photoCounts.get(m.inspection_id) ?? 0) + 1)
+  }
+
+  const rows: InspectionRow[] = inspections.slice(0, INSPECTION_TABLE_ROWS).map(i => {
+    const site = flattenEmbedded(i.sites)
+    const supervisor = flattenEmbedded(i.staff)
+    return {
+      id: i.id,
+      date: i.date,
+      siteName: site?.name ?? null,
+      templateType: i.sc_template_type as InspectionTemplateType,
+      supervisorName: supervisor?.name ?? null,
+      taskCount: taskCounts.get(i.id) ?? 0,
+      weedCount: weedCounts.get(i.id) ?? 0,
+      photoCount: photoCounts.get(i.id) ?? 0,
+      status: asProcessingStatus(i.processing_status),
+    }
+  })
+
+  let dailyWorkReports = 0
+  let chemicalRecords = 0
+  let failed = 0
+  for (const i of inspections) {
+    if (i.sc_template_type === 'daily_work_report') dailyWorkReports++
+    else if (i.sc_template_type === 'chemical_application_record') chemicalRecords++
+    if (i.processing_status === 'failed') failed++
+  }
+
+  return {
+    rows,
+    totals: {
+      total: inspections.length,
+      dailyWorkReports,
+      chemicalRecords,
+      failed,
+    },
+    shown: rows.length,
     generatedAt: new Date().toISOString(),
   }
 }
