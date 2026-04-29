@@ -127,3 +127,75 @@ export type ReportsListData = {
   }
   generatedAt: string
 }
+
+// ─── E13: Operations — Staff & Hours ────────────────────────────────
+
+export type StaffRosterRow = {
+  id: string
+  name: string
+  role: string | null
+  active: boolean
+  inspectionCount: number
+  totalHours: number
+}
+
+export type StaffData = {
+  totalStaff: number
+  activeStaff: number
+  totalHours: number
+  topPerformerName: string | null
+  topPerformerHours: number
+  hoursByStaff: LabelValue[]
+  roster: StaffRosterRow[]
+  generatedAt: string
+}
+
+// ─── E13: Operations — Chemicals ────────────────────────────────────
+
+export type ChemicalApplicationRecordRow = {
+  id: string
+  date: string | null
+  siteName: string | null
+  applicationMethod: string | null
+  weatherGeneral: string | null
+}
+
+export type ChemicalLookupCard = {
+  canonicalName: string
+  type: string | null
+  activeIngredient: string | null
+  mentions: number
+}
+
+export type ChemicalsData = {
+  chemicalRecords: number
+  uniqueChemicals: number
+  applicationRecords: number
+  mostUsedName: string | null
+  mostUsedMentions: number
+  usageBars: LabelValue[]
+  recentApplications: ChemicalApplicationRecordRow[]
+  reference: ChemicalLookupCard[]
+  generatedAt: string
+}
+
+// ─── E13: Operations — Species ──────────────────────────────────────
+
+export type SpeciesLookupCard = {
+  canonicalName: string
+  scientificName: string | null
+  speciesType: string | null
+  category: string | null
+  sightings: number
+}
+
+export type SpeciesData = {
+  totalSightings: number
+  uniqueSpecies: number
+  referenceCount: number
+  mostCommonName: string | null
+  mostCommonSightings: number
+  frequencyBars: LabelValue[]
+  cards: SpeciesLookupCard[]
+  generatedAt: string
+}
