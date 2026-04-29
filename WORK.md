@@ -16,9 +16,27 @@
 
 ## Current Sprint
 
+### Task 2 — Fix site/activity persistence (RLS bug)
+**Branch:** `feat/activity-redesign`
+**Status:** Ready to migrate — awaiting James approval
+**PR:** —
+
+**Root cause (confirmed):** `project_site_links` table was created in migration 008 without any RLS policies. Supabase has RLS enabled, so INSERT returns error `42501: new row violates row-level security policy`. Sites never persist → activities appear orphaned.
+
+**Parallelisation analysis:** Single migration file — not parallelisable. Sequential: create SQL → get approval → run in Supabase SQL Editor.
+
+**Fix:** `supabase/migrations/012_rls_project_site_links.sql` — adds `anon_all_project_site_links` policy (`FOR ALL TO anon USING (true) WITH CHECK (true)`).
+
+**Acceptance criteria:**
+- [ ] James approves and runs `012_rls_project_site_links.sql` in Supabase SQL Editor
+- [ ] Create project with sites → sites persist (Sites tab shows them)
+- [ ] Activities linked to those sites display correctly in Activities tab
+
+---
+
 ### Task 1 — Allocation Spread Panel
 **Branch:** `feat/allocation-spread-panel`
-**Status:** In Progress
+**Status:** Complete (code) — pending Vercel preview test
 **PR:** —
 
 **What:** Add a "Spread" toggle button next to the Allocation Strategy select in the activity form. When clicked, expands an inline panel showing the month-by-month allocation breakdown.
@@ -30,13 +48,13 @@
 **Parallelisation analysis:** Not applicable — all changes are in one tightly-coupled file. One `AllocationSpreadPanel` component added, then wired into three form contexts (ActivityDrawer, AddProjectModal expanded form, AddProjectModal new-activity form).
 
 **Acceptance criteria:**
-- [ ] "Spread" button appears to the right of the Allocation Strategy select in ActivityDrawer
-- [ ] Clicking "Spread" expands a panel below showing per-month breakdown
-- [ ] Even spread: read-only month chips with computed per-month value
-- [ ] Custom: editable month inputs with running total vs target, validation colour
-- [ ] Switching to "Custom" auto-opens the panel
-- [ ] Same button + panel added to both activity forms in AddProjectModal
-- [ ] No regressions in existing save / custom-alloc persistence logic
+- [x] "Spread" button appears to the right of the Allocation Strategy select in ActivityDrawer
+- [x] Clicking "Spread" expands a panel below showing per-month breakdown
+- [x] Even spread: read-only month chips with computed per-month value
+- [x] Custom: editable month inputs with running total vs target, validation colour
+- [x] Switching to "Custom" auto-opens the panel
+- [x] Same button + panel added to both activity forms in AddProjectModal
+- [ ] No regressions in existing save / custom-alloc persistence logic (blocked by Task 2)
 
 ---
 
