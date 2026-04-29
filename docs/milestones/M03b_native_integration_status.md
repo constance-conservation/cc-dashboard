@@ -1,107 +1,102 @@
 # M03b — Native Integration: live status
 
 **Repo (canonical):** `constance-conservation/cc-dashboard`
-**Source-of-truth plan:** originally
-`~/Desktop/constance-reporting/milestones/M03b_native_integration.md`,
-mirrored here as the **live tracker** since `constance-reporting` will
-be archived in E18. Keep this file updated as briefs ship.
-
-**Last updated:** 2026-04-29 (post-audit, plan revised E10–E18).
+**Last updated:** 2026-04-29 (round 2 merged: E10b + E11 + E13; round 3 briefs ready)
 
 **Audit artefacts:**
 - `docs/audit/standalone_feature_inventory.md` — master feature inventory + revised plan
-- `docs/audit/operations_data_wiring.md` — Operations 3-page deep-dive (parallel session)
+- `docs/audit/operations_data_wiring.md` — Operations 3-page deep-dive
 
 ---
 
 ## Goal
 
-Replace the standalone reporting app at `constance-reporting.vercel.app`
-with native Next.js routes inside cc-dashboard at
-`app/(dashboard)/reporting/*`, then archive the standalone repo and
-retire its Vercel deploy.
-
-Original plan (E8–E12) was sketched before the standalone was fully
-crawled. After the audit, surface area is bigger than five briefs —
-revised lineup is **E8 + F1 + E9 + E10–E18 (10 forward briefs, ~9 days)**.
+Replace the standalone reporting app (`constance-reporting.vercel.app`) with native Next.js routes inside cc-dashboard at `app/(dashboard)/reporting/*`, then archive the standalone repo and retire its Vercel deploy.
 
 ---
 
 ## Brief status
 
-| Brief | Scope | Status | Detail |
-|---|---|---|---|
-| **E8** | Scaffold `/reporting/*` + landing page | ✅ Merged 2026-04-29 (`abe77e2`) | PR #9 |
-| **F1** | Sub-nav (Overview / Operations / Reports) | ✅ Merged with E8 (`9ba953f` then squashed) | — |
-| **E9** | Clients / Sites / Zones drill-down + cadence selector on client detail | ✅ Merged 2026-04-29 (`3f28162`) | PR #29 · `docs/executor_briefs/E9_clients_sites_zones_hierarchy.md` |
-| **E10** | Reports list + read-only viewer (open PDF in new tab, download DOCX). Edit mode deferred to E10b. | 🟡 Brief drafted post-audit, not yet implemented. | `docs/executor_briefs/E10_reports_page.md` |
-| **E11** | Inspections page — wide table + 4 KPIs | ⏸ Queued | — |
-| **E12** | Pipeline Health page — KPIs, donut, bar list, recent failures, sync state | ⏸ Queued | — |
-| **E13** | Operations 3-pages: Staff & Hours, Chemicals, Species (read-only) | ⏸ Queued, scoping done | `docs/audit/operations_data_wiring.md` |
-| **E14** | Global Sites view — cross-client roll-up (added per Peter 2026-04-29) | ⏸ Queued. Adds nav entry. | — |
-| **E15** | Inline CRUD across reporting views: editable fields, add/delete sites and zones, schedule widget for sites/zones | ⏸ Queued. Confirmed in scope by Peter. | — |
-| **E10b** | Edit mode + image uploads (`contentEditable` iframe + drop zones for location maps + period maps) | ⏸ Deferred — Peter said "edit mode can come later" | — |
-| **E16** | Generation pipeline — port `src/report/` + `src/bin/generate_report.ts` into cc-dashboard's `lib/reporting/generation/`. Wire to "Generate Now" + Vercel Cron. **Includes tests for incoming reports + analysis/processing logic per Peter.** | ⏸ Queued. Full port (NOT lightweight CLI wrap). | — |
-| **E17** | Sync pipeline + webhook | ⏸ Queued. Default: Vercel Cron incremental + manual CLI for full backfill. Confirm before implementing. | — |
-| **E18** | Cutover — flip APPS card href, retire standalone Vercel deploy, archive `FrostyFruit1/constance-reporting` | ⏸ Final brief | — |
+| Brief | Scope | Status |
+|---|---|---|
+| **E8**  | Landing page + scaffold | ✅ Merged 2026-04-29 (`abe77e2`) |
+| **F1**  | Sub-nav (Overview / Operations / Reports) | ✅ Merged with E8 |
+| **E9**  | Clients/Sites/Zones drill-down + cadence selector | ✅ Merged 2026-04-29 (`3f28162`) |
+| **E10** | Reports list + read-only viewer | ✅ Merged 2026-04-29 (`82e8d0d`) |
+| **E13** | Operations 3 pages (Staff/Chemicals/Species) + sub-nav un-grey | ✅ Merged 2026-04-29 (`5510202`) |
+| **E10b** | Report preview + edit mode + image uploads | ✅ Merged 2026-04-29 (`b2fd8f3`) |
+| **E11** | Inspections page | ✅ Merged 2026-04-29 (`94ddcf1`) |
+| **E12** | Pipeline Health page | 🟡 Brief ready (`docs/executor_briefs/E12_pipeline_health_page.md`) |
+| **E14** | Global Sites view + sub-nav entry | 🟡 Brief ready (`docs/executor_briefs/E14_global_sites_view.md`) |
+| **E15** | Inline CRUD across reporting views | 🟡 Brief ready (`docs/executor_briefs/E15_inline_crud.md`) |
+| **E15b** | Add/delete sites + zones + new client | ⏸ Deferred from E15 |
+| **E16** | Generation pipeline (full port + tests) | ⏸ Queued (~2 days) |
+| **E17** | Sync + webhook (Vercel Cron incremental) | ⏸ Queued |
+| **E18** | Cutover — flip APPS card href, retire standalone | ⏸ Final brief |
+
+After **E12 + E14** merge, the entire standalone is fully *viewable* through cc-dashboard.
+After **E10b + E15** merge, all editing is in cc-dashboard (E10b done, E15 in flight).
+After **E16 + E17**, generation + sync run in cc-dashboard.
+After **E18**, standalone retired.
+
+---
+
+## Round 3 in flight
+
+```
+E12  /reporting/pipeline                     ½ day  worktree -e12
+E14  /reporting/sites + sub-nav entry        ½ day  worktree -e14
+E15  inline CRUD on /reporting/clients/*    full day  worktree -e15
+```
+
+All three use isolated git worktrees (per the round-2 lessons).
+
+Orchestrator prompts:
+- `docs/orchestrator_prompts/E12_session_prompt.md`
+- `docs/orchestrator_prompts/E14_session_prompt.md`
+- `docs/orchestrator_prompts/E15_session_prompt.md`
 
 ---
 
 ## Decisions logged
 
 ### Pre-audit
-- **Stack mismatch resolved by porting, not merging.** Standalone is Node + TS pipeline; cc-dashboard is Next.js 16. (Pre-E8.)
-- **Both apps point at the same Supabase project** (`ymcyunspmljaruodjpkd`), confirmed 2026-04-29. F2 finding "more photos on port" was data drift, not divergence.
-- **F1 sub-nav design:** 5 items mapped to existing routes are linked; 3 Operations items greyed.
-- **Reporting views read-only initially**, with one approved exception in E9: cadence selector (writes `clients.report_frequency`).
-- **Sort on `/reporting/clients`:** alphabetical by `long_name || name`. Archived clients NOT hidden.
+- Stack mismatch resolved by porting (not merging). cc-dashboard = Next 16, standalone = Node service.
+- Both apps point at the same Supabase project (`ymcyunspmljaruodjpkd`).
+- F1 sub-nav design: 5 items linked + 3 Operations greyed (E13 un-greyed all).
+- Reporting views read-only initially, with cadence selector exception in E9.
+- Sort `/reporting/clients` alphabetically, archived clients NOT hidden.
 
 ### Post-audit (2026-04-29)
-- **`page-sites` (E14) — IN.** Cross-client global sites view will be ported and added to sub-nav as `Overview → Sites`.
-- **CRUD on reporting views (E15) — IN.** Inline editing on `/reporting/clients/*` and similar reporting routes, in addition to cc-dashboard's master `/clients` CRUD page.
-- **Generation pipeline (E16) — full port.** Lift `src/report/` into cc-dashboard's `lib/reporting/generation/` with tests for incoming reports + analysis/processing. NOT a lightweight CLI wrapper.
-- **Sync pipeline (E17) — undecided.** Default if not overridden: Vercel Cron incremental sync + manual CLI for full backfill (60s Cron timeout likely insufficient for backfill).
-- **Edit mode (E10b) — deferred.** Comes after E16. Read-only viewer (E10) ships first.
-- **Operations brief (E13) is one PR**, not three sub-briefs. Recommended by parallel-session audit (`operations_data_wiring.md` §4): all three pages share infrastructure, are zero-schema, and the sub-nav un-greying should be atomic.
+- E14 (Global Sites view) — IN.
+- E15 (Inline CRUD on reporting views) — IN.
+- E16 (Generation pipeline) — full port (NOT lightweight wrap), with tests + analysis on incoming reports.
+- E17 (Sync) — default to Vercel Cron incremental + manual CLI for backfill.
+- E10b (Edit mode + uploads) — bumped up in priority by Peter; merged in round 2.
 
----
-
-## Recommended order of execution
-
-```
-1. E10  Reports read-only viewer       (½ day)
-2. E11  Inspections page               (½ day)
-3. E12  Pipeline Health page           (½ day)
-4. E13  Operations 3-pages             (1 day)
-5. E14  Global Sites view              (½ day) — un-greyed nav final
-6. E15  Inline CRUD                    (1 day)
-7. E16  Generation pipeline + cron     (2 days)
-8. E10b Edit mode + uploads            (1 day)
-9. E17  Sync + webhook                 (1 day)
-10. E18 Cutover                        (~1h)
-```
-
-After step 5: standalone is fully VIEWABLE through cc-dashboard.
-After steps 6+8: all editing is in cc-dashboard.
-After step 7: generation is in cc-dashboard (manual + cron).
-After step 9: all data flow is in cc-dashboard (sync + webhook).
-After step 10: standalone retired.
+### Round 2 (2026-04-29 evening)
+- Three parallel sessions in one working tree caused branch chaos (E11/E13 stashed each other's work). E10b session figured out git worktrees mid-flight.
+- **Standing rule from round 3: each parallel session uses its own `git worktree`** — see `docs/orchestrator_prompts/README.md` for the pattern.
+- E15 split: edit-field + schedule widget = E15. Add/delete = E15b (deferred).
+- HTML sanitisation on `client_reports.html_content` deferred per E10b PR caveat — must be revisited before reports are emailed or rendered to non-editing users.
 
 ---
 
 ## Out-of-band tracks
 
-| Track | Status | Detail |
-|---|---|---|
-| Service-role key rotation | ⏸ Optional, low urgency. | Service-role JWT was pasted into a parallel session transcript on 2026-04-29 to unblock `vercel env pull`. Anon key + URL are designed-public, lower concern. |
-| `next lint` broken on cc-dashboard | ⏸ Pre-existing, low urgency. | Next 16 removed `next lint`. `package.json` script needs replacing with `eslint .`. |
-| Schema migration parity in cc-dashboard | ⏸ Post-E18 hygiene. | Standalone owns ~20 tables that cc-dashboard's `supabase/migrations/` does not contain. After E18 retires standalone, these migrations should be backfilled into cc-dashboard for ownership clarity. |
-| Canonical-vs-raw count fix in Chemicals + Species | ⏸ Optional, post-E13. | Standalone uses `*_name_raw` for the count and `canonical_name` for matching, so cards under-count. Mirror standalone in E13 for parity, fix as follow-up if Peter agrees. |
+| Track | Status |
+|---|---|
+| Service-role key rotation | ⏸ Optional, low urgency. Pasted into transcript 2026-04-29. |
+| `next lint` broken on cc-dashboard | ⏸ Pre-existing, low urgency. |
+| Schema migration parity in cc-dashboard | ⏸ Post-E18 hygiene. Standalone owns ~20 tables not in cc-dashboard's `supabase/migrations/`. |
+| Canonical-vs-raw count fix in Chemicals + Species | ⏸ Optional follow-up. Mirrored standalone behaviour in E13. |
+| HTML sanitisation on saved report HTML | ⏸ Low-medium urgency depending on E18 audience. |
 
 ---
 
 ## Next session entry point
 
 1. Read this file + `docs/audit/standalone_feature_inventory.md`.
-2. If E10 brief at `docs/executor_briefs/E10_reports_page.md` is still aligned with goals, cut `feature/reporting-port-e10` off `main` and implement.
-3. Update this status doc as briefs land.
+2. If round 3 (E12/E14/E15) is in flight, watch for PR notifications.
+3. Once round 3 lands, plan round 4: probably E15b + E16 starts.
+4. Update this status doc as briefs land.

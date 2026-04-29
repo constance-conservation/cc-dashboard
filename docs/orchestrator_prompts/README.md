@@ -32,11 +32,35 @@ the prompt body into the first message. The instance:
 The orchestrator (the main Claude Code session) reviews each PR and
 performs the merge.
 
-## Active prompts
+## Active prompts (round 3)
 
-- `E10b_session_prompt.md` — edit mode + image uploads (largest)
-- `E11_session_prompt.md` — Inspections page (smallest)
-- `E13_session_prompt.md` — Operations 3 pages (medium)
+- `E12_session_prompt.md` — Pipeline Health page (½ day)
+- `E14_session_prompt.md` — Global Sites view (½ day; adds new sub-nav entry)
+- `E15_session_prompt.md` — Inline CRUD across reporting views (full day)
+
+## Archive (merged)
+
+- `E10b_session_prompt.md` — edit mode + image uploads ✅ merged
+- `E11_session_prompt.md` — Inspections page ✅ merged
+- `E13_session_prompt.md` — Operations 3 pages ✅ merged
+
+## Worktree pattern (round 3+)
+
+After round 2 hit branch chaos (multiple sessions stashing each other's
+work in a single shared tree), the standard is now:
+
+```
+cd /Users/feelgood/Desktop/cc-dashboard
+git checkout main && git pull
+git worktree add /Users/feelgood/Desktop/cc-dashboard-eXX -b feature/reporting-port-eXX main
+cd /Users/feelgood/Desktop/cc-dashboard-eXX
+cp /Users/feelgood/Desktop/cc-dashboard/.env.local .
+npm install
+```
+
+Each session lives in its own physical directory. No `git checkout`
+fights. After merge, the orchestrator runs `git worktree remove
+/Users/feelgood/Desktop/cc-dashboard-eXX` to clean up.
 
 ## Adding new prompts
 
