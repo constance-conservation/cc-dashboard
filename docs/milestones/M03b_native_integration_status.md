@@ -1,7 +1,7 @@
 # M03b — Native Integration: live status
 
 **Repo (canonical):** `constance-conservation/cc-dashboard`
-**Last updated:** 2026-04-29 evening (round 5 merged: E17. All Stream 1 ingestion code now resident in cc-dashboard; only cutover (E18) remains.)
+**Last updated:** 2026-04-29 evening (round 6 code merged: E18 — APPS card href flipped. Awaiting Peter's admin runbook: Vercel env vars + SC webhook re-registration + standalone retirement + GitHub archival).
 
 **Audit artefacts:**
 - `docs/audit/standalone_feature_inventory.md` — master feature inventory + revised plan
@@ -32,13 +32,14 @@ Replace the standalone reporting app (`constance-reporting.vercel.app`) with nat
 | **E15b** | Add/delete sites + zones + new client | ✅ Merged 2026-04-29 (`5f332a1`, PR #42) |
 | **E16** | Generation pipeline (full port + tests + Vercel Cron) | ✅ Merged 2026-04-29 (`84bdbec`, PR #43) |
 | **E17** | Sync + webhook (incremental only — backfill dropped) | ✅ Merged 2026-04-29 (`cbe6225`, PR #44) |
-| **E18** | Cutover — flip APPS card href, update SC webhook URL, retire standalone | ⏸ Final brief — round 6 |
+| **E18** | Cutover — flip APPS card href, update SC webhook URL, retire standalone | 🔄 Code merged 2026-04-29 (`368a047`, PR #45). Admin runbook pending Peter's execution. |
 
 After **E12 + E14**, the entire standalone is fully *viewable* through cc-dashboard.
 After **E10b + E15 + E15b**, all CRUD is in cc-dashboard.
 After **E16**, generation runs in cc-dashboard (manual button + daily Vercel Cron).
-After **E17**, sync + webhook run in cc-dashboard (cron route gated on `CRON_SECRET`; webhook route exists but SC still points at the standalone until E18).
-After **E18**, standalone retired and SC webhook re-registered to cc-dashboard.
+After **E17**, sync + webhook run in cc-dashboard (cron route gated on `CRON_SECRET`; webhook route exists but SC still points at the standalone until E18 admin runbook).
+After **E18 code merge**, the home-page APPS card points users at `/reporting`. Admin runbook (env vars, SC webhook re-registration, standalone retirement, repo archival) gates the rest of cutover.
+After **E18 admin runbook complete**, M03b is done and the standalone is fully retired.
 
 ---
 
@@ -81,6 +82,35 @@ Both apps point at the same Supabase project. As of merge:
 - Standalone's last sync: **2026-04-22**, `total_synced=724`. There is a ~7-day gap of inspections in SC that haven't been pulled.
 - The first successful cc-dashboard cron fire (after `CRON_SECRET` is added) will pull all inspections modified since 2026-04-22 in one shot. Function has `maxDuration = 300` and the standalone has handled larger batches before. Idempotent (`sc_audit_id` dedup, `sc_modified_at` change check) — no duplicate writes if the standalone is still running.
 - SC webhooks continue to flow to the standalone until E18's re-registration step.
+
+---
+
+## Round 6 — code merged 2026-04-29; admin runbook pending
+
+```
+E18  cutover — APPS card href flip   ✅ 368a047 (PR #45 — orchestrator-direct, no executor session)
+```
+
+The 1-line code change is the only PR in round 6. The substance of the cutover is the admin runbook documented in `docs/executor_briefs/E18_cutover.md`, which Peter executes in this order:
+
+| # | Step | Status |
+|---|---|---|
+| 1 | Add `CRON_SECRET` to Vercel project env (preview + production) — `openssl rand -hex 32` | ⏸ Pending |
+| 2 | Add `SAFETY_CULTURE_API_TOKEN` to Vercel project env (preview + production) — sourced from SC dashboard or password vault | ⏸ Pending |
+| 3 | Re-register SC webhook URL → `https://<cc-dashboard-canonical-domain>/api/webhooks/sc` (events: `inspection.completed`, `inspection.updated`) | ⏸ Pending |
+| 4 | Trigger one cc-dashboard sync to close the ~7-day gap; verify `summary.failed[]` is empty | ⏸ Pending |
+| 5 | Retire the standalone Vercel deploy (`cc-digital/constance-reporting`) — pause first, then delete after retention period | ⏸ Pending |
+| 6 | Archive `FrostyFruit1/constance-reporting` on GitHub (read-only) | ⏸ Pending |
+| 7 | (Optional, deferable) Delete legacy `~/Desktop/CONSTANCE\ CONSERVATION/` working directory | ⏸ Pending |
+
+After step 4 succeeds, cc-dashboard is the sole writer to the shared Supabase project. After step 6, the standalone source is read-only forever (the local clone at `~/Desktop/constance-reporting/` remains for emergency `npm run sync:backfill` use cases). After all steps, M03b is done.
+
+### What round 6 added
+
+**E18 — Cutover (code portion only)**
+- `app/(dashboard)/page.tsx:13` — APPS card href changed from `https://constance-reporting.vercel.app/` to `/reporting`. Users clicking the "Staff Reporting" card on the home page now land in the native cc-dashboard view rather than the standalone domain.
+- No other code changes. The card name ("Staff Reporting") and description left unchanged — UX choices outside cutover scope.
+- No tests added; the change is a string-literal swap with no functional logic.
 
 ### What round 4 added
 
