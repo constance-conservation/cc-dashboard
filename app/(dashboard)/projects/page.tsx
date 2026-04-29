@@ -213,7 +213,7 @@ function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, custom
           ))}
         </div>
         {total > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--line)', fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--line)', fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
             Total: {total} {unit}
           </div>
         )}
@@ -1479,7 +1479,7 @@ function ActivityTypesModal({ state, onClose }: {
                 <input className="input" placeholder="Brief description…" value={newDesc}
                   onChange={e => setNewDesc(e.target.value)} />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
                 <button type="submit" className="btn primary" style={{ flexShrink: 0 }}>
                   <Icon name="plus" size={12} /> Add
                 </button>
@@ -1503,7 +1503,7 @@ function ActivityTypesModal({ state, onClose }: {
                         <input className="input" value={editDesc} onChange={e => setEditDesc(e.target.value)}
                           placeholder="Description…"
                           onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditId(null) }} />
-                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-start' }}>
                           <button className="btn primary" onClick={commitEdit} style={{ fontSize: 12, padding: '5px 10px' }}>Save</button>
                           <button className="btn" onClick={() => setEditId(null)} style={{ fontSize: 12, padding: '5px 10px' }}>Cancel</button>
                         </div>
@@ -1529,7 +1529,6 @@ function ActivityTypesModal({ state, onClose }: {
           </div>
 
           <div className="drawer-foot">
-            <div style={{ flex: 1 }} />
             <button className="btn" onClick={onClose}>Close</button>
           </div>
         </div>
