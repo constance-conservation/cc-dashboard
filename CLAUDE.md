@@ -12,6 +12,22 @@ These rules govern every session in this repository. Follow them exactly.
 
 ---
 
+## Memory management
+
+Continuously write to the persistent memory system at `C:\Users\61422\.claude\projects\c--Users-61422-Projects-cc-dashboard\memory\` throughout every session. Do not wait until the end.
+
+**Save immediately when you learn:**
+- A new tool, integration, or credential is available (type: `reference`)
+- James corrects your approach or confirms a non-obvious one worked (type: `feedback`)
+- A task decision, deadline, or constraint is stated (type: `project`)
+- Anything about James's role, preferences, or working style (type: `user`)
+
+**What NOT to save:** code patterns derivable from reading files, git history, ephemeral task state that only matters this session.
+
+**Format:** Each memory is its own `.md` file with frontmatter (`name`, `description`, `type`). Always update `MEMORY.md` index after writing or updating a file. Check for an existing memory to update before creating a new one.
+
+---
+
 ## Work tracking
 
 - **WORK.md** is the single source of truth for sprint tasks, backlog, and completed work.
