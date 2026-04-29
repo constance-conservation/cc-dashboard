@@ -92,3 +92,38 @@ export type SiteDetailData = {
 }
 
 export type ReportScope = 'client' | 'site' | 'zone'
+
+// ─── E10: Reports list + viewer ─────────────────────────────────────
+
+export type ReportStatus = 'draft' | 'review' | 'approved' | 'sent'
+
+export type ReportListItem = {
+  id: string
+  title: string | null
+  clientName: string | null
+  siteName: string | null
+  status: ReportStatus
+  reportPeriodStart: string | null
+  reportPeriodEnd: string | null
+  pdfUrl: string | null
+  docxUrl: string | null
+  createdAt: string
+}
+
+export type ScopeContext = {
+  scope: ReportScope | null
+  id: string | null
+  displayName: string | null
+}
+
+export type ReportsListData = {
+  reports: ReportListItem[]
+  scopeContext: ScopeContext
+  totals: {
+    total: number
+    drafts: number
+    review: number
+    approved: number
+  }
+  generatedAt: string
+}
