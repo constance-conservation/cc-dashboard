@@ -1757,17 +1757,24 @@ function LocationPickerModal({ initialLat, initialLng, onConfirm, onClose }: {
   }, [leafletReady])
 
   return (
-    <div className="drawer-backdrop" onClick={onClose} style={{ zIndex: 1100 }}>
-      <div style={{ width: 640, maxWidth: '95vw', background: 'var(--bg-card)', borderRadius: 16, overflow: 'hidden', boxShadow: '0 8px 40px rgba(0,0,0,0.35)' }}
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1100,
+        background: 'oklch(0.1 0.01 150 / 0.6)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <div style={{ width: 580, maxWidth: '95vw', background: 'var(--bg-elev)', borderRadius: 14, overflow: 'hidden', boxShadow: '0 12px 48px rgba(0,0,0,0.45)', border: '1px solid var(--line)' }}
         onClick={e => e.stopPropagation()}>
-        <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--line)' }}>
+        <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--line)' }}>
           <div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 600 }}>Set project location</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600 }}>Set project location</div>
             <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>Click on the map to pin the project site</div>
           </div>
           <button className="iconbtn" onClick={onClose}><Icon name="close" size={16} /></button>
         </div>
-        <div style={{ position: 'relative', height: 380 }}>
+        <div style={{ position: 'relative', height: 300, margin: '12px 12px 0', borderRadius: 8, overflow: 'hidden' }}>
           <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
           {!leafletReady && (
             <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
@@ -1775,7 +1782,7 @@ function LocationPickerModal({ initialLat, initialLng, onConfirm, onClose }: {
             </div>
           )}
         </div>
-        <div style={{ padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--line)' }}>
+        <div style={{ padding: '12px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
           <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: picked ? 'var(--ink-2)' : 'var(--ink-3)' }}>
             {picked ? `${picked.lat.toFixed(5)}, ${picked.lng.toFixed(5)}` : 'No location selected'}
           </span>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
@@ -80,6 +80,81 @@ function ListManagerModal({ title, items, onAdd, onRemove, onRename, onClose, no
   )
 }
 
+function EmpLocationPickerModal({ initialLat, initialLng, onConfirm, onClose }: {
+  initialLat?: number
+  initialLng?: number
+  onConfirm: (lat: number, lng: number) => void
+  onClose: () => void
+}) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapRef = useRef<HTMLDivElement>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapInstance = useRef<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markerRef = useRef<any>(null)
+  const [leafletReady, setLeafletReady] = useState(typeof window !== 'undefined' && !!(window as any).L)
+  const [picked, setPicked] = useState<{ lat: number; lng: number } | undefined>(
+    initialLat != null && initialLng != null ? { lat: initialLat, lng: initialLng } : undefined
+  )
+
+  useEffect(() => {
+    if ((window as any).L) { setLeafletReady(true); return }
+    const css = document.createElement('link'); css.rel = 'stylesheet'
+    css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+    css.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY='; css.crossOrigin = ''
+    document.head.appendChild(css)
+    const s = document.createElement('script')
+    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+    s.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo='; s.crossOrigin = ''
+    s.onload = () => setLeafletReady(true); document.head.appendChild(s)
+  }, [])
+
+  useEffect(() => {
+    if (!leafletReady || !mapRef.current || mapInstance.current) return
+    const L = (window as any).L
+    const center: [number, number] = initialLat != null && initialLng != null ? [initialLat, initialLng] : [-33.87, 151.21]
+    const map = L.map(mapRef.current, { zoomControl: true, attributionControl: false }).setView(center, initialLat != null ? 13 : 8)
+    mapInstance.current = map
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(map)
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, opacity: 0.7 }).addTo(map)
+    if (initialLat != null && initialLng != null) markerRef.current = L.marker([initialLat, initialLng]).addTo(map)
+    map.on('click', (e: any) => {
+      const { lat, lng } = e.latlng
+      if (markerRef.current) markerRef.current.remove()
+      markerRef.current = L.marker([lat, lng]).addTo(map)
+      setPicked({ lat, lng })
+    })
+  }, [leafletReady])
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'oklch(0.1 0.01 150 / 0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: 520, maxWidth: '95vw', background: 'var(--bg-elev)', borderRadius: 14, overflow: 'hidden', boxShadow: '0 12px 48px rgba(0,0,0,0.45)', border: '1px solid var(--line)' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--line)' }}>
+          <div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600 }}>Set home location</div>
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>Click to mark where this employee lives</div>
+          </div>
+          <button className="iconbtn" onClick={onClose}><Icon name="close" size={16} /></button>
+        </div>
+        <div style={{ position: 'relative', height: 280, margin: '12px 12px 0', borderRadius: 8, overflow: 'hidden' }}>
+          <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+          {!leafletReady && <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Loading map…</div>}
+        </div>
+        <div style={{ padding: '12px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+          <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: picked ? 'var(--ink-2)' : 'var(--ink-3)' }}>
+            {picked ? `${picked.lat.toFixed(5)}, ${picked.lng.toFixed(5)}` : 'No location selected'}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={onClose}>Cancel</button>
+            <button className="btn primary" disabled={!picked} onClick={() => picked && onConfirm(picked.lat, picked.lng)}>Confirm location</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function EmployeeCard({ emp, onOpen, onUnarchive }: {
   emp: Employee
   onOpen?: () => void
@@ -137,6 +212,7 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
   const isArchived = !state.employees.find(e => e.id === employeeId)
   const [edit, setEdit] = useState<Employee>(emp)
   const [confirm, setConfirm] = useState<'delete' | 'archive' | null>(null)
+  const [showHomePicker, setShowHomePicker] = useState(false)
   const save = () => { state.updateEmployee(emp.id, edit); onClose() }
   const del = () => setConfirm('delete')
   const archive = () => setConfirm('archive')
@@ -193,6 +269,32 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
         <Field label="Email"><input className="input" value={edit.email} onChange={e => setEdit({ ...edit, email: e.target.value })} /></Field>
         <Field label="Phone"><input className="input" value={edit.phone} onChange={e => setEdit({ ...edit, phone: e.target.value })} /></Field>
       </div>
+      <Field label="Home address (optional)">
+        <input className="input" placeholder="e.g. 12 Smith St, Camden NSW 2570"
+          value={edit.address ?? ''}
+          onChange={e => setEdit({ ...edit, address: e.target.value || undefined })} />
+      </Field>
+      <Field label="Home location">
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {edit.homeLat != null ? (
+            <span style={{ fontSize: 12, color: 'var(--ink-2)', fontFamily: 'var(--font-mono)' }}>
+              {edit.homeLat.toFixed(5)}, {edit.homeLng?.toFixed(5)}
+            </span>
+          ) : (
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Not set</span>
+          )}
+          <button type="button" className="btn" style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={() => setShowHomePicker(true)}>
+            {edit.homeLat != null ? 'Edit' : 'Set location'}
+          </button>
+          {edit.homeLat != null && (
+            <button type="button" className="iconbtn" style={{ color: 'var(--danger)' }}
+              onClick={() => setEdit({ ...edit, homeLat: undefined, homeLng: undefined })}>
+              <Icon name="close" size={12} />
+            </button>
+          )}
+        </div>
+      </Field>
       <Field label="Weekly availability">
         <div style={{ display: 'flex', gap: 4 }}>
           {days.map(d => (
@@ -208,12 +310,21 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
         <SkillsEditor selected={edit.skills} allSkills={state.skills} onChange={skills => setEdit({ ...edit, skills })} onAddSkill={state.addSkill} />
       </Field>
     </Drawer>
+    {showHomePicker && (
+      <EmpLocationPickerModal
+        initialLat={edit.homeLat}
+        initialLng={edit.homeLng}
+        onConfirm={(lat, lng) => { setEdit({ ...edit, homeLat: lat, homeLng: lng }); setShowHomePicker(false) }}
+        onClose={() => setShowHomePicker(false)}
+      />
+    )}
     </>
   )
 }
 
 function AddEmployeeModal({ state, onClose }: { state: ReturnType<typeof useCCState>; onClose: () => void }) {
-  const [e, setE] = useState<Omit<Employee, 'id'>>({ name: '', role: state.roles[0] || 'Field Crew', type: 'full-time', payRate: 40, email: '', phone: '', availability: { mon: true, tue: true, wed: true, thu: true, fri: true, sat: false }, skills: [] })
+  const [e, setE] = useState<Omit<Employee, 'id'>>({ name: '', role: state.roles[0] || 'Field Crew', type: 'full-time', payRate: 40, email: '', phone: '', availability: { mon: true, tue: true, wed: true, thu: true, fri: true, sat: false }, skills: [], address: undefined, homeLat: undefined, homeLng: undefined })
+  const [showHomePicker, setShowHomePicker] = useState(false)
   const save = () => { if (!e.name.trim()) return; state.addEmployee(e); onClose() }
   const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
   return (
@@ -231,6 +342,40 @@ function AddEmployeeModal({ state, onClose }: { state: ReturnType<typeof useCCSt
         <Field label="Email"><input className="input" type="email" placeholder="email@example.com" value={e.email} onChange={ev => setE({ ...e, email: ev.target.value })} /></Field>
         <Field label="Phone"><input className="input" type="tel" placeholder="04xx xxx xxx" value={e.phone} onChange={ev => setE({ ...e, phone: ev.target.value })} /></Field>
       </div>
+      <Field label="Home address (optional)">
+        <input className="input" placeholder="e.g. 12 Smith St, Camden NSW 2570"
+          value={e.address ?? ''}
+          onChange={ev => setE({ ...e, address: ev.target.value || undefined })} />
+      </Field>
+      <Field label="Home location">
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {e.homeLat != null ? (
+            <span style={{ fontSize: 12, color: 'var(--ink-2)', fontFamily: 'var(--font-mono)' }}>
+              {e.homeLat.toFixed(5)}, {e.homeLng?.toFixed(5)}
+            </span>
+          ) : (
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Not set</span>
+          )}
+          <button type="button" className="btn" style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={() => setShowHomePicker(true)}>
+            {e.homeLat != null ? 'Edit' : 'Set location'}
+          </button>
+          {e.homeLat != null && (
+            <button type="button" className="iconbtn" style={{ color: 'var(--danger)' }}
+              onClick={() => setE({ ...e, homeLat: undefined, homeLng: undefined })}>
+              <Icon name="close" size={12} />
+            </button>
+          )}
+        </div>
+      </Field>
+      {showHomePicker && (
+        <EmpLocationPickerModal
+          initialLat={e.homeLat}
+          initialLng={e.homeLng}
+          onConfirm={(lat, lng) => { setE({ ...e, homeLat: lat, homeLng: lng }); setShowHomePicker(false) }}
+          onClose={() => setShowHomePicker(false)}
+        />
+      )}
       <Field label="Pay rate (AUD/hr)"><NumericInput className="input" value={e.payRate} onChange={v => setE({ ...e, payRate: v })} /></Field>
       <Field label="Weekly availability">
         <div style={{ display: 'flex', gap: 4 }}>

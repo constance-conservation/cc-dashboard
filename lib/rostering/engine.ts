@@ -292,11 +292,21 @@ export function autoGenerate(
       )
       if (avail.length === 0) return
 
+      const proximityPenalty = (emp: Employee, activity: Activity, opts: AutoGenerateOptions): number => {
+        if (emp.homeLat == null || emp.homeLng == null) return 0
+        const proj = opts.projects?.find(p => p.id === activity.projectId)
+        if (!proj?.lat || !proj?.lng) return 0
+        const km = haversineKm(emp.homeLat, emp.homeLng, proj.lat, proj.lng)
+        // Scale: 0 penalty at 0km, 0.3 penalty at 100km+
+        return Math.min(0.3, km / 333)
+      }
+
       const scored = avail.map(e => ({
         e,
         score: act.skills.filter(s => e.skills.includes(s)).length
           + (e.role === 'Field Supervisor' ? 0.5 : 0)
-          - (empLoad[e.id] ?? 0) * 0.1,  // penalise heavily-loaded employees
+          - (empLoad[e.id] ?? 0) * 0.1  // penalise heavily-loaded employees
+          - proximityPenalty(e, act, options),
       })).sort((a, b) => b.score - a.score)
 
       const minNeeded  = act.crewSizeType === 'any' ? 1 : act.minCrew

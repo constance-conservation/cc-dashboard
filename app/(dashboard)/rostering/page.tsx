@@ -1,11 +1,10 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer } from '@/components/dashboard/Drawer'
-import { Select } from '@/components/dashboard/Select'
 import { NumericInput } from '@/components/dashboard/NumericInput'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import type { RosterAssignment, Activity, Employee, ActivityCarryover, CarryoverStatus } from '@/lib/types'
@@ -198,12 +197,14 @@ function DayEditor({ day, ym, state, onClose }: {
   const assignments = state.roster[dKey] || []
   const update      = (next: RosterAssignment[]) => state.updateDay(dKey, next)
 
-  const [search,   setSearch]   = useState('')
-  const [addingTo, setAddingTo] = useState<string | null>(null)
+  const [search,    setSearch]    = useState('')
+  const [addingTo,  setAddingTo]  = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [actSearch, setActSearch] = useState<Record<string, string>>({})
 
-  const available         = state.employees.filter(e => e.availability[wdName as keyof typeof e.availability])
-  const assignedIds       = new Set(assignments.map(a => a.employeeId))
-  const unassignedAvail   = available.filter(e => !assignedIds.has(e.id))
+  const available       = state.employees.filter(e => e.availability[wdName as keyof typeof e.availability])
+  const assignedIds     = new Set(assignments.map(a => a.employeeId))
+  const unassignedAvail = available.filter(e => !assignedIds.has(e.id))
 
   // Projects with active activities on this day, plus any already-assigned projects
   const projectsForDay = useMemo(
@@ -218,6 +219,20 @@ function DayEditor({ day, ym, state, onClose }: {
   const filtered = search.trim()
     ? allProjects.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
     : allProjects
+
+  // Pre-fill actSearch with current activity label when assignments change
+  useEffect(() => {
+    setActSearch(prev => {
+      const next = { ...prev }
+      assignments.forEach(a => {
+        if (a.activityId && !next[a.employeeId]) {
+          const actLabel = state.activities.find(x => x.id === a.activityId)?.name ?? ''
+          if (actLabel) next[a.employeeId] = actLabel
+        }
+      })
+      return next
+    })
+  }, [assignments])
 
   const changeActivity = (empId: string, activityId: string) => {
     const act = activityId ? state.activities.find(a => a.id === activityId) : undefined
@@ -247,132 +262,192 @@ function DayEditor({ day, ym, state, onClose }: {
         </div>
       )}
 
-      {/* Search */}
-      <input
-        className="input"
-        placeholder="Search projects…"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        style={{ width: '100%', marginBottom: 14 }}
-      />
+      {/* Section 1: Assigned projects */}
+      {assignedProjectIds.size > 0 && (
+        <>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
+            Assigned ({assignedProjectIds.size})
+          </div>
+          {[...assignedProjectIds].map(pid => {
+            const project = state.projects.find(p => p.id === pid)
+            if (!project) return null
+            const projAssignments = assignments.filter(a => a.projectId === pid)
+            const isCollapsed = collapsed.has(pid)
+            const actOpts = state.activities
+              .filter(a => a.projectId === pid && a.status === 'active'
+                && parseDate(a.start) <= dayDate && parseDate(a.end) >= dayDate)
+              .map(a => ({ value: a.id, label: a.name }))
 
-      {filtered.length === 0 && (
+            return (
+              <div key={pid} style={{ marginBottom: 8, border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden' }}>
+                {/* Collapsible header */}
+                <div style={{ display: 'flex', alignItems: 'center', padding: '9px 12px', background: 'var(--bg-sunken)', gap: 8 }}>
+                  <button
+                    style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, textAlign: 'left' }}
+                    onClick={() => setCollapsed(prev => { const next = new Set(prev); next.has(pid) ? next.delete(pid) : next.add(pid); return next })}
+                  >
+                    <span style={{ fontSize: 9, color: 'var(--ink-3)', transition: 'transform 0.15s', display: 'inline-block', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>▼</span>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>{project.name}</span>
+                    <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+                      {projAssignments.length} staff
+                    </span>
+                  </button>
+                  <button
+                    className="btn"
+                    style={{ fontSize: 11, padding: '3px 10px', height: 26, flexShrink: 0, color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                    onClick={() => update(assignments.filter(a => a.projectId !== pid))}
+                  >
+                    Remove
+                  </button>
+                  <button
+                    className="btn"
+                    style={{ fontSize: 11, padding: '3px 10px', height: 26, flexShrink: 0 }}
+                    onClick={() => setAddingTo(addingTo === pid ? null : pid)}
+                  >
+                    + Add
+                  </button>
+                </div>
+
+                {!isCollapsed && (
+                  <>
+                    {/* Assigned staff */}
+                    {projAssignments.map(a => {
+                      const emp = state.employees.find(x => x.id === a.employeeId)
+                      if (!emp) return null
+                      const query = actSearch[a.employeeId] ?? ''
+                      const filteredOpts = actOpts.filter(o => o.label.toLowerCase().includes(query.toLowerCase()))
+                      return (
+                        <div key={a.employeeId} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '9px 12px', background: 'var(--bg-elev)', borderTop: '1px solid var(--line)' }}>
+                          <div className="staff-avatar" style={{ width: 28, height: 28, fontSize: 10, flexShrink: 0, marginTop: 1 }}>
+                            {emp.name.split(' ').map((x: string) => x[0]).join('')}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{emp.role}</div>
+                            {actOpts.length > 0 && (
+                              <div style={{ marginTop: 5 }}>
+                                <input
+                                  className="input"
+                                  placeholder="Search activity…"
+                                  value={query}
+                                  onChange={ev => setActSearch(prev => ({ ...prev, [a.employeeId]: ev.target.value }))}
+                                  style={{ fontSize: 11, width: '100%', marginBottom: 3 }}
+                                />
+                                {filteredOpts.length > 0 && (query || a.activityId) && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                    {filteredOpts.map(opt => (
+                                      <button
+                                        key={opt.value}
+                                        style={{
+                                          textAlign: 'left', padding: '4px 8px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
+                                          background: a.activityId === opt.value ? 'var(--accent-soft)' : 'var(--bg-sunken)',
+                                          color: a.activityId === opt.value ? 'var(--accent)' : 'var(--ink-2)',
+                                          border: 'none', width: '100%',
+                                        }}
+                                        onClick={() => { changeActivity(a.employeeId, opt.value); setActSearch(prev => ({ ...prev, [a.employeeId]: opt.label })) }}
+                                      >
+                                        {opt.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <button className="iconbtn" onClick={() => removeAssignment(a.employeeId)}
+                            style={{ color: 'var(--ink-3)', flexShrink: 0, marginTop: 2 }}>
+                            <Icon name="close" size={13} />
+                          </button>
+                        </div>
+                      )
+                    })}
+
+                    {/* Staff picker — shows when addingTo === pid */}
+                    {addingTo === pid && (
+                      <div style={{ borderTop: '1px solid var(--line)' }}>
+                        {unassignedAvail.length === 0 ? (
+                          <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)', background: 'var(--bg-elev)' }}>All available staff are already assigned.</div>
+                        ) : (
+                          unassignedAvail.map((emp, i) => (
+                            <button key={emp.id} onClick={() => addStaff(emp.id, pid)}
+                              style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', padding: '8px 12px', background: 'var(--bg-elev)', cursor: 'pointer', textAlign: 'left', borderTop: i > 0 ? '1px solid var(--line)' : 'none' }}>
+                              <div className="staff-avatar" style={{ width: 26, height: 26, fontSize: 9, flexShrink: 0 }}>
+                                {emp.name.split(' ').map((x: string) => x[0]).join('')}
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 12, fontWeight: 500 }}>{emp.name}</div>
+                                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                  {emp.role}{emp.skills.length > 0 ? ' · ' + emp.skills.slice(0, 2).join(', ') : ''}
+                                </div>
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )
+          })}
+          <div style={{ height: 1, background: 'var(--line)', margin: '8px 0 14px' }} />
+        </>
+      )}
+
+      {/* Section 2: Projects with active activities not yet assigned */}
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
+        Projects
+      </div>
+      <input className="input" placeholder="Search projects…" value={search}
+        onChange={e => setSearch(e.target.value)} style={{ width: '100%', marginBottom: 10 }} />
+
+      {filtered.filter(p => !assignedProjectIds.has(p.id)).length === 0 && (
         <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
-          {search ? 'No projects match.' : 'No active projects on this day.'}
+          {search ? 'No projects match.' : assignedProjectIds.size > 0 ? 'All active projects assigned.' : 'No active projects on this day.'}
         </div>
       )}
 
-      {/* Project list */}
-      {filtered.map(project => {
-        const projAssignments = assignments.filter(a => a.projectId === project.id)
-        const actOpts = state.activities
-          .filter(a => a.projectId === project.id && a.status === 'active'
-            && parseDate(a.start) <= dayDate && parseDate(a.end) >= dayDate)
-          .map(a => ({ value: a.id, label: a.name }))
-        const canOT = state.activities.some(
-          a => a.projectId === project.id && a.status === 'active' && a.overtimeFlag
-        )
-        const isAdding = addingTo === project.id
-
-        return (
-          <div key={project.id} style={{
-            marginBottom: 10, border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden',
-          }}>
-            {/* Project header */}
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '9px 12px', background: 'var(--bg-sunken)',
-            }}>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{project.name}</div>
-              <button
-                className="btn"
-                style={{ fontSize: 11, padding: '3px 10px', height: 26, flexShrink: 0 }}
-                onClick={() => setAddingTo(isAdding ? null : project.id)}
-              >
-                {isAdding ? 'Cancel' : '+ Add staff'}
-              </button>
+      {filtered.filter(p => !assignedProjectIds.has(p.id)).map(project => (
+        <div key={project.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--line)', borderRadius: 8, marginBottom: 6 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500 }}>{project.name}</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', marginTop: 2 }}>
+              {state.activities.filter(a => a.projectId === project.id && a.status === 'active' && parseDate(a.start) <= dayDate && parseDate(a.end) >= dayDate).length} active activities
             </div>
-
-            {/* Assigned staff */}
-            {projAssignments.map(a => {
-              const emp = state.employees.find(x => x.id === a.employeeId)
-              if (!emp) return null
-              return (
-                <div key={a.employeeId} style={{
-                  display: 'flex', gap: 8, alignItems: 'flex-start',
-                  padding: '9px 12px', background: 'var(--bg-elev)',
-                  borderTop: '1px solid var(--line)',
-                }}>
-                  <div className="staff-avatar" style={{ width: 28, height: 28, fontSize: 10, flexShrink: 0, marginTop: 1 }}>
-                    {emp.name.split(' ').map(x => x[0]).join('')}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      {emp.role}
-                    </div>
-                    {actOpts.length > 0 && (
-                      <Select
-                        value={a.activityId ?? ''}
-                        placeholder="No activity…"
-                        onChange={v => changeActivity(a.employeeId, v)}
-                        options={actOpts}
-                        style={{ fontSize: 11, marginTop: 5, width: '100%' }}
-                      />
-                    )}
-                    {canOT && (
-                      <NumericInput
-                        className="input"
-                        placeholder="OT hrs"
-                        value={a.overtimeHours ?? 0}
-                        onChange={v => toggleOvertime(a.employeeId, v)}
-                        style={{ width: '100%', fontSize: 11, marginTop: 4 }}
-                      />
-                    )}
-                  </div>
-                  <button className="iconbtn" onClick={() => removeAssignment(a.employeeId)}
-                    style={{ color: 'var(--ink-3)', flexShrink: 0, marginTop: 2 }}>
-                    <Icon name="close" size={13} />
-                  </button>
-                </div>
-              )
-            })}
-
-            {/* Staff picker */}
-            {isAdding && (
-              <div style={{ borderTop: '1px solid var(--line)' }}>
-                {unassignedAvail.length === 0 ? (
-                  <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)', background: 'var(--bg-elev)' }}>
-                    All available staff are already assigned.
-                  </div>
-                ) : (
-                  unassignedAvail.map((emp, i) => (
-                    <button
-                      key={emp.id}
-                      onClick={() => addStaff(emp.id, project.id)}
-                      style={{
-                        display: 'flex', gap: 8, alignItems: 'center', width: '100%',
-                        padding: '8px 12px', background: 'var(--bg-elev)', cursor: 'pointer',
-                        textAlign: 'left', borderTop: i > 0 ? '1px solid var(--line)' : 'none',
-                      }}
-                    >
-                      <div className="staff-avatar" style={{ width: 26, height: 26, fontSize: 9, flexShrink: 0 }}>
-                        {emp.name.split(' ').map(x => x[0]).join('')}
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 500 }}>{emp.name}</div>
-                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                          {emp.role}{emp.skills.length > 0 ? ' · ' + emp.skills.slice(0, 2).join(', ') : ''}
-                        </div>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
           </div>
-        )
-      })}
+          <button
+            className="btn primary"
+            style={{ fontSize: 11, padding: '3px 10px', height: 26, flexShrink: 0 }}
+            onClick={() => setAddingTo(addingTo === project.id ? null : project.id)}
+          >
+            {addingTo === project.id ? 'Cancel' : 'Add'}
+          </button>
+        </div>
+      ))}
+
+      {/* Staff picker for unassigned project */}
+      {addingTo && !assignedProjectIds.has(addingTo) && (
+        <div style={{ border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden', marginTop: -2, marginBottom: 8 }}>
+          {unassignedAvail.length === 0 ? (
+            <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)', background: 'var(--bg-elev)' }}>All available staff are already assigned.</div>
+          ) : (
+            unassignedAvail.map((emp, i) => (
+              <button key={emp.id} onClick={() => addStaff(emp.id, addingTo)}
+                style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', padding: '8px 12px', background: 'var(--bg-elev)', cursor: 'pointer', textAlign: 'left', borderTop: i > 0 ? '1px solid var(--line)' : 'none' }}>
+                <div className="staff-avatar" style={{ width: 26, height: 26, fontSize: 9, flexShrink: 0 }}>
+                  {emp.name.split(' ').map((x: string) => x[0]).join('')}
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 500 }}>{emp.name}</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    {emp.role}{emp.skills.length > 0 ? ' · ' + emp.skills.slice(0, 2).join(', ') : ''}
+                  </div>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
     </Drawer>
   )
 }
@@ -547,6 +622,7 @@ export default function RosteringPage() {
   const [showCarryoverReview, setShowCarryoverReview] = useState(false)
   const [reviewEntries, setReviewEntries]             = useState<ReviewEntry[]>([])
   const [generating, setGenerating]                   = useState(false)
+  const [weatherNotice, setWeatherNotice]             = useState<string[] | null>(null)
 
   const n = daysInMonth(state.rosterMonth)
   const hasSat = state.employees.some(e => e.availability.sat)
@@ -630,6 +706,26 @@ export default function RosteringPage() {
       Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
       Object.assign(newRoster, generated)
       state.setRoster(newRoster)
+
+      // Detect weather-constrained activities that got fewer visits than target
+      const weatherNotices: string[] = []
+      for (const act of state.activities) {
+        if (act.status !== 'active') continue
+        const actType = state.activityTypes.find(t => t.id === act.activityTypeId)
+        if (!actType?.weatherConstraints?.length) continue
+        const proj = state.projects.find(p => p.id === act.projectId)
+        if (!proj?.lat || !proj?.lng) continue
+        let visits = 0
+        for (const dKey in generated) {
+          if (!dKey.startsWith(state.rosterMonth)) continue
+          if (generated[dKey].some(a => a.activityId === act.id)) visits++
+        }
+        const target = computeMonthlyTarget(act, state.rosterMonth, state.allocations)
+        if (target > 0 && visits < target) {
+          weatherNotices.push(act.name)
+        }
+      }
+      if (weatherNotices.length > 0) setWeatherNotice(weatherNotices)
     } finally {
       setGenerating(false)
     }
@@ -707,11 +803,13 @@ export default function RosteringPage() {
     const [yr, mo] = state.rosterMonth.split('-').map(Number)
     const d = new Date(yr, mo - 2, 1)
     state.setRosterMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+    setWeatherNotice(null)
   }
   const nextMonth = () => {
     const [yr, mo] = state.rosterMonth.split('-').map(Number)
     const d = new Date(yr, mo, 1)
     state.setRosterMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+    setWeatherNotice(null)
   }
 
   // ── Calendar grid ──────────────────────────────────────────────────────────
@@ -760,6 +858,29 @@ export default function RosteringPage() {
             state.setRosterMonth(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`)
           }}>Today</button>
         </div>
+
+        {weatherNotice && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px',
+            background: 'var(--warning-soft, oklch(0.97 0.04 85))',
+            border: '1px solid var(--warning, oklch(0.75 0.12 85))',
+            borderRadius: 8, marginBottom: 14, fontSize: 13,
+          }}>
+            <div style={{ flex: 1 }}>
+              <strong>Weather constraints may have reduced scheduling</strong>
+              <div style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 3 }}>
+                {weatherNotice.length === 1
+                  ? `"${weatherNotice[0]}" was scheduled fewer times than planned — weather conditions may have blocked some days.`
+                  : `${weatherNotice.length} activities were scheduled fewer times than planned — weather conditions may have blocked some days: ${weatherNotice.slice(0, 3).join(', ')}${weatherNotice.length > 3 ? ` +${weatherNotice.length - 3} more` : ''}.`
+                }
+              </div>
+            </div>
+            <button className="iconbtn" style={{ color: 'var(--ink-3)', flexShrink: 0 }}
+              onClick={() => setWeatherNotice(null)}>
+              <Icon name="close" size={13} />
+            </button>
+          </div>
+        )}
 
         {/* Calendar */}
         <div className="cal">

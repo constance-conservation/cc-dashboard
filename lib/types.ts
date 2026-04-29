@@ -50,6 +50,9 @@ export type Employee = {
   skills: string[]
   email: string
   phone: string
+  address?: string
+  homeLat?: number
+  homeLng?: number
 }
 
 // Top-level project container. Scheduling, crew, and rates live on Activities.
