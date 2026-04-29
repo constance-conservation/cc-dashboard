@@ -24,9 +24,9 @@ const SECTIONS: Section[] = [
   {
     heading: 'Operations',
     items: [
-      { name: 'Staff & Hours', icon: 'staff',   href: null },
-      { name: 'Chemicals',     icon: 'cloud',   href: null },
-      { name: 'Species',       icon: 'archive', href: null },
+      { name: 'Staff & Hours', icon: 'staff',   href: '/reporting/staff' },
+      { name: 'Chemicals',     icon: 'cloud',   href: '/reporting/chemicals' },
+      { name: 'Species',       icon: 'archive', href: '/reporting/species' },
     ],
   },
   {

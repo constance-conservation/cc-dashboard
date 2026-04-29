@@ -449,3 +449,75 @@ input, select, textarea { font-family: inherit; font-size: inherit; color: inher
   font-family: var(--font-mono), monospace; font-weight: 500; font-variant-numeric: tabular-nums;
   margin-left: auto; color: var(--ink); min-width: 36px; text-align: right;
 }
+
+/* ── Reporting (E13: Operations card grids) ────────────────── */
+.three-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.chem-card, .species-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.chem-card:hover, .species-card:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.chem-card { padding: 18px 22px; }
+.chem-name {
+  font-size: 15px; font-weight: 500; letter-spacing: -0.01em; margin-bottom: 2px;
+}
+.chem-type {
+  font-family: var(--font-mono), monospace; font-size: 11px;
+  color: var(--ink-3); letter-spacing: 0.04em; text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.chem-stat-row { display: flex; gap: 24px; }
+.chem-stat-val {
+  font-family: var(--font-display), sans-serif; font-size: 18px; font-weight: 400;
+  font-variant-numeric: tabular-nums; color: var(--ink); letter-spacing: -0.01em;
+}
+.chem-stat-lbl {
+  font-family: var(--font-mono), monospace; font-size: 10px; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px;
+}
+
+.species-card {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px; gap: 12px;
+}
+.species-info { flex: 1; min-width: 0; }
+.species-name { font-size: 14px; font-weight: 500; letter-spacing: -0.01em; }
+.species-sci { font-size: 12px; color: var(--ink-3); font-style: italic; }
+.species-count {
+  font-family: var(--font-display), sans-serif; font-size: 22px; font-weight: 400;
+  font-variant-numeric: tabular-nums; color: var(--accent); letter-spacing: -0.01em;
+  text-align: right;
+}
+.species-count-label {
+  font-family: var(--font-mono), monospace; font-size: 10px; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.05em; text-align: right;
+}
+
+.empty-state { text-align: center; padding: 48px 20px; color: var(--ink-3); }
+.empty-state .icon { font-size: 36px; margin-bottom: 12px; opacity: 0.4; }
+.empty-state .msg { font-size: 14px; }
+
+.car-record {
+  background: var(--bg-sunken);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+.car-record:last-child { margin-bottom: 0; }
+.car-record-site { font-weight: 500; font-size: 13px; }
+.car-record-meta {
+  font-family: var(--font-mono), monospace; font-size: 11px;
+  color: var(--ink-3); margin-top: 4px; letter-spacing: 0.02em;
+}
