@@ -26,6 +26,8 @@ import type {
   InspectionsListData,
   InspectionTemplateType,
   ProcessingStatus,
+  SiteWithStats,
+  SitesGlobalData,
 } from './types'
 
 const TOP_N = 8
@@ -817,6 +819,85 @@ export async function getInspectionsListData(): Promise<InspectionsListData> {
       failed,
     },
     shown: rows.length,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E14: Global Sites view ─────────────────────────────────────────
+
+const SITES_GLOBAL_INSPECTIONS_LIMIT = 5000
+const SITES_GLOBAL_PERSONNEL_LIMIT = 10000
+
+export async function getSitesGlobalData(): Promise<SitesGlobalData> {
+  const supabase = await createClient()
+
+  const [sitesRes, inspectionsRes, personnelRes] = await Promise.all([
+    supabase
+      .from('sites')
+      .select('id,name,site_type,project_code'),
+    supabase
+      .from('inspections')
+      .select('id,site_id')
+      .limit(SITES_GLOBAL_INSPECTIONS_LIMIT),
+    supabase
+      .from('inspection_personnel')
+      .select('inspection_id,hours_worked')
+      .limit(SITES_GLOBAL_PERSONNEL_LIMIT),
+  ])
+
+  if (sitesRes.error) throw new Error(`sites query failed: ${sitesRes.error.message}`)
+  if (inspectionsRes.error) throw new Error(`inspections query failed: ${inspectionsRes.error.message}`)
+  if (personnelRes.error) throw new Error(`inspection_personnel query failed: ${personnelRes.error.message}`)
+
+  type RawSiteRow = { id: string; name: string; site_type: string | null; project_code: string | null }
+  type RawInspectionRef = { id: string; site_id: string | null }
+  type RawPersonnelRef = { inspection_id: string | null; hours_worked: number | string | null }
+
+  const rawSites = (sitesRes.data ?? []) as RawSiteRow[]
+  const rawInspections = (inspectionsRes.data ?? []) as RawInspectionRef[]
+  const rawPersonnel = (personnelRes.data ?? []) as RawPersonnelRef[]
+
+  const inspectionToSite = new Map<string, string>()
+  const inspectionCountBySite = new Map<string, number>()
+  for (const i of rawInspections) {
+    if (!i.site_id) continue
+    inspectionToSite.set(i.id, i.site_id)
+    inspectionCountBySite.set(i.site_id, (inspectionCountBySite.get(i.site_id) ?? 0) + 1)
+  }
+
+  const hoursBySite = new Map<string, number>()
+  for (const p of rawPersonnel) {
+    if (!p.inspection_id) continue
+    const siteId = inspectionToSite.get(p.inspection_id)
+    if (!siteId) continue
+    const h = typeof p.hours_worked === 'number'
+      ? p.hours_worked
+      : parseFloat(p.hours_worked ?? '') || 0
+    hoursBySite.set(siteId, (hoursBySite.get(siteId) ?? 0) + h)
+  }
+
+  const sites: SiteWithStats[] = rawSites
+    .map(s => ({
+      id: s.id,
+      name: s.name,
+      siteType: s.site_type,
+      projectCode: s.project_code,
+      inspectionCount: inspectionCountBySite.get(s.id) ?? 0,
+      hours: Math.round(hoursBySite.get(s.id) ?? 0),
+    }))
+    .sort((a, b) => b.inspectionCount - a.inspectionCount)
+
+  const sitesWithInspections = sites.filter(s => s.inspectionCount > 0).length
+  const mostActive = sites[0] && sites[0].inspectionCount > 0 ? sites[0] : null
+  const totalHours = Array.from(hoursBySite.values()).reduce((s, h) => s + h, 0)
+
+  return {
+    sites,
+    totalSites: sites.length,
+    sitesWithInspections,
+    mostActiveName: mostActive?.name ?? null,
+    mostActiveCount: mostActive?.inspectionCount ?? 0,
+    totalHours: Math.round(totalHours),
     generatedAt: new Date().toISOString(),
   }
 }
