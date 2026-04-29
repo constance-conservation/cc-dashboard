@@ -9,6 +9,11 @@ import type {
   SiteSummary,
   SiteDetailData,
   ZoneRow,
+  ReportsListData,
+  ReportListItem,
+  ReportStatus,
+  ReportScope,
+  ScopeContext,
 } from './types'
 
 const TOP_N = 8
@@ -325,6 +330,109 @@ export async function getSiteDetailData(siteId: string): Promise<SiteDetailData 
     clientName: clientRow?.name ?? 'Unknown client',
     clientLongName: clientRow?.long_name ?? null,
     zones,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E10: Reports list + viewer ─────────────────────────────────────
+
+type RawReport = {
+  id: string
+  title: string | null
+  status: ReportStatus
+  report_period_start: string | null
+  report_period_end: string | null
+  pdf_url: string | null
+  docx_url: string | null
+  created_at: string
+  client_id: string | null
+  site_id: string | null
+  clients: { name?: string | null; long_name?: string | null } | { name?: string | null; long_name?: string | null }[] | null
+  sites: { name?: string | null } | { name?: string | null }[] | null
+}
+
+export async function getReportsListData(
+  params: { scope: ReportScope | null; id: string | null },
+): Promise<ReportsListData> {
+  const supabase = await createClient()
+  const { scope, id } = params
+
+  let query = supabase
+    .from('client_reports')
+    .select(
+      'id,title,status,report_period_start,report_period_end,pdf_url,docx_url,created_at,client_id,site_id,clients(name,long_name),sites(name)',
+    )
+    .order('created_at', { ascending: false })
+    .limit(100)
+
+  if (scope === 'client' && id) {
+    query = query.eq('client_id', id)
+  } else if ((scope === 'site' || scope === 'zone') && id) {
+    query = query.eq('site_id', id)
+  }
+
+  const reportsRes = await query
+  if (reportsRes.error) throw new Error(`reports query failed: ${reportsRes.error.message}`)
+
+  const rows = (reportsRes.data ?? []) as RawReport[]
+
+  const reports: ReportListItem[] = rows.map(r => {
+    const client = Array.isArray(r.clients) ? r.clients[0] : r.clients
+    const site = Array.isArray(r.sites) ? r.sites[0] : r.sites
+    return {
+      id: r.id,
+      title: r.title,
+      clientName: client?.long_name || client?.name || null,
+      siteName: site?.name ?? null,
+      status: r.status,
+      reportPeriodStart: r.report_period_start,
+      reportPeriodEnd: r.report_period_end,
+      pdfUrl: r.pdf_url,
+      docxUrl: r.docx_url,
+      createdAt: r.created_at,
+    }
+  })
+
+  let scopeContext: ScopeContext = { scope: null, id: null, displayName: null }
+  if (scope && id) {
+    if (scope === 'client') {
+      const c = await supabase
+        .from('clients')
+        .select('name,long_name')
+        .eq('id', id)
+        .maybeSingle()
+      const row = c.data as { name?: string | null; long_name?: string | null } | null
+      scopeContext = {
+        scope,
+        id,
+        displayName: row?.long_name || row?.name || 'Unknown client',
+      }
+    } else {
+      const s = await supabase
+        .from('sites')
+        .select('name,long_name')
+        .eq('id', id)
+        .maybeSingle()
+      const row = s.data as { name?: string | null; long_name?: string | null } | null
+      scopeContext = {
+        scope,
+        id,
+        displayName: row?.long_name || row?.name || `Unknown ${scope}`,
+      }
+    }
+  }
+
+  const totals = {
+    total: reports.length,
+    drafts: reports.filter(r => r.status === 'draft').length,
+    review: reports.filter(r => r.status === 'review').length,
+    approved: reports.filter(r => r.status === 'approved' || r.status === 'sent').length,
+  }
+
+  return {
+    reports,
+    scopeContext,
+    totals,
     generatedAt: new Date().toISOString(),
   }
 }
