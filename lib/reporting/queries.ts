@@ -14,6 +14,7 @@ import type {
   ReportStatus,
   ReportScope,
   ScopeContext,
+  ReportDetail,
 } from './types'
 
 const TOP_N = 8
@@ -434,5 +435,59 @@ export async function getReportsListData(
     scopeContext,
     totals,
     generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E10b: Report detail (preview + edit) ──────────────────────────
+
+type RawReportDetail = {
+  id: string
+  client_id: string | null
+  title: string | null
+  status: ReportStatus
+  report_period_start: string | null
+  report_period_end: string | null
+  pdf_url: string | null
+  docx_url: string | null
+  html_content: string | null
+  period_map_images: string[] | null
+  created_at: string
+  clients: { name?: string | null; long_name?: string | null; location_maps?: string[] | null } | { name?: string | null; long_name?: string | null; location_maps?: string[] | null }[] | null
+  sites: { name?: string | null } | { name?: string | null }[] | null
+}
+
+export async function getReportDetail(id: string): Promise<ReportDetail | null> {
+  const supabase = await createClient()
+  const res = await supabase
+    .from('client_reports')
+    .select(
+      'id,client_id,title,status,report_period_start,report_period_end,pdf_url,docx_url,html_content,period_map_images,created_at,clients(name,long_name,location_maps),sites(name)',
+    )
+    .eq('id', id)
+    .maybeSingle()
+
+  if (res.error) throw new Error(`report detail query failed: ${res.error.message}`)
+  if (!res.data) return null
+
+  const r = res.data as RawReportDetail
+  const client = Array.isArray(r.clients) ? r.clients[0] : r.clients
+  const site = Array.isArray(r.sites) ? r.sites[0] : r.sites
+
+  return {
+    id: r.id,
+    clientId: r.client_id,
+    title: r.title,
+    status: r.status,
+    reportPeriodStart: r.report_period_start,
+    reportPeriodEnd: r.report_period_end,
+    pdfUrl: r.pdf_url,
+    docxUrl: r.docx_url,
+    htmlContent: r.html_content,
+    periodMapImages: Array.isArray(r.period_map_images) ? r.period_map_images : null,
+    clientName: client?.name ?? null,
+    clientLongName: client?.long_name ?? null,
+    siteName: site?.name ?? null,
+    locationMaps: Array.isArray(client?.location_maps) ? client?.location_maps ?? null : null,
+    createdAt: r.created_at,
   }
 }

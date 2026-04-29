@@ -127,3 +127,26 @@ export type ReportsListData = {
   }
   generatedAt: string
 }
+
+// ─── E10b: Report detail (preview + edit) ──────────────────────────
+
+export type LocationMapsArray = string[] | null
+export type PeriodMapsArray = string[] | null
+
+export type ReportDetail = {
+  id: string
+  clientId: string | null
+  title: string | null
+  status: ReportStatus
+  reportPeriodStart: string | null
+  reportPeriodEnd: string | null
+  pdfUrl: string | null
+  docxUrl: string | null
+  htmlContent: string | null
+  periodMapImages: PeriodMapsArray
+  clientName: string | null
+  clientLongName: string | null
+  siteName: string | null
+  locationMaps: LocationMapsArray
+  createdAt: string
+}

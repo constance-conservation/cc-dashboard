@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import type { ReportListItem, ReportStatus } from '@/lib/reporting/types'
 
 const statusClass: Record<ReportStatus, string> = {
@@ -63,9 +64,12 @@ export function ReportRow({ report }: { report: ReportListItem }) {
       }}
     >
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>
+        <Link
+          href={`/reporting/reports/${report.id}`}
+          style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)', textDecoration: 'none' }}
+        >
           {report.title || 'Untitled report'}
-        </div>
+        </Link>
         <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
           {fmtPeriod(report.reportPeriodStart, report.reportPeriodEnd)}
           {report.clientName ? ` · ${report.clientName}` : ''}
