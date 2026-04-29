@@ -95,42 +95,76 @@ Live status: `docs/milestones/M03b_native_integration_status.md`.
 
 ## 5. What comes after M03b
 
-**TBD** — to be filled in from the business-detail transcript.
+The post-M03b direction shifts from *reporting* (now solved) to **operator
+efficiency**. The bottleneck is not insight-starvation — it's the time
+the business owners spend on tendering, rostering, and resource allocation
+that should be spent on strategy, partnerships, and the next stage of the
+moat. Until that time is freed, no amount of analytics moves the needle:
+nobody has the bandwidth to act on it.
 
-The framing we'll be building from in the next planning session:
+The shaping observations:
 
-- **Three plausible directions** for the immediately-next phase:
-  1. **Polish M03b debt** — sanitisation, signed-URL TTL, cadence accuracy,
-     other out-of-band tracks. ~½ day. Conservative.
-  2. **One thin analytics slice** — pick a single high-value cut (e.g.,
-     chemical × species effectiveness over time, or hours-per-zone trends)
-     and prototype it as a new `/reporting/analytics` page on top of existing
-     Stream 1 data. ~3–5 days. Validates analytics *value* before paying the
-     M06 warehouse cost.
-  3. **Full M06 warehouse buildout** — schema + materialised views + ingestion
-     pipelines for Streams 2–4 per the milestone doc. ~2–4 weeks. Substantial
-     ahead-of-need investment; benefits compound as more data lands.
-- **Working hypothesis (orchestrator's recommendation, 2026-04-29):**
-  option 2 — pick a single most-asked-for analytics cut, ship it, validate
-  the value, then decide whether to invest in the full M06 schema or iterate
-  on more slices first.
-- **What the transcript will inform:** which specific business questions are
-  most valuable to answer first, what the priority ordering across Streams 2–6
-  looks like in light of how the business actually works, and any constraints
-  (contract obligations, stakeholder visibility requirements, billing
-  triggers) that should shape the build.
+- **Tendering eats most of one operator's time.** Email-driven, council-by-council,
+  document-heavy, judgment-heavy. The site-visit and assessment work is
+  competitive edge — the response *drafting* work is repetitive and
+  AI-tractable.
+- **Capacity is the constraint, not pipeline.** The business is winning
+  more than it can deliver. Capacity-aware bidding (intelligent estimates
+  of resources required for a new tender, diffed against current commitments)
+  is the unlock — making bidding *easier* with accurate forecasts, not
+  throttling it.
+- **Industry knowledge sits in two heads.** Primary/secondary/maintenance
+  staging, weed ID, density estimation, zone triage. Field tools that
+  capture this *as work happens* are the only way to delegate it without
+  losing fidelity.
+- **Client relationships compound.** Every tender, every site visit, every
+  report deepens what's known about a given client and their sites. If
+  this context is captured structurally rather than tribally, it becomes
+  the asset the platform sells on.
+
+**Cross-cutting design principle:** every milestone after M03b writes
+into a single **client-context spine** (the `organizations → clients →
+sites → zones → inspections → client_reports` hierarchy that M03b ships).
+Tenders hang off it. Resource consumption hangs off it. Field captures
+hang off it. The spine is additive, not rewritten — and it becomes the
+asset that justifies treating cc-dashboard as a standalone product over
+time.
 
 ---
 
 ## 6. Scope plan
 
-**TBD** — to be drafted in the planning session that consumes the transcript.
+Milestones M04–M09. M04 and M05 are immediately actionable post-E18
+cutover; M06–M09 are queued with scope sketched but deferred for round-by-round
+expansion. Each milestone follows M03b's status-doc conventions
+(`docs/milestones/MXX_*.md`), with executor briefs and orchestrator
+session prompts written round-by-round once the technical shape is
+locked.
 
-Will live as concrete milestone briefs under `docs/milestones/` once the
-shape is settled, following the M03b conventions:
-- One status doc per milestone (e.g., `M04_*.md`, `M06_*.md`).
-- Executor briefs at `docs/executor_briefs/EXX_<short_name>.md`.
+| # | Milestone | One-line scope | What it writes to the spine | Status |
+|---|---|---|---|---|
+| **M04** | Tender Intake & Drafting Pipeline | Email → tender-doc parse → response draft. Owner reviews and sends. | Tender artefacts per client/site (bid history, methodology, scope) | ⏸ Queued — full status doc at `docs/milestones/M04_tender_pipeline_status.md` |
+| **M05** | Resource Forecast & Allocation Cockpit | Plant/equipment/staff registry + live allocation + historic-project ledger + similarity-matching: "this tender needs X, you have Y, gap is Z" | Resource consumption per past project, joined to client/site | ⏸ Queued — `docs/milestones/M05_resource_forecast_cockpit_status.md` |
+| **M06** | Field Capture & Site-Triage Tool | Mobile photo + GPS + AI weed ID + zone tag + primary/secondary/maintenance stage. Runs alongside Safety Culture. | Photos, density, weed IDs, stage tags per site | ⏸ Queued — outline at `docs/milestones/M06_field_capture_status.md` |
+| **M07** | Client Context & Relationship Layer | Two surfaces: (a) internal relationship intelligence aggregating the spine, (b) curated client-facing portal | (Reads only — surfaces what M03b/M04/M05/M06 wrote) | ⏸ Queued — outline at `docs/milestones/M07_client_context_status.md` |
+| **M08** | Treatment Effectiveness Analytics (Stream 2) | Treatment × species × season effectiveness — the long-cycle data moat | (Reads + computes derived materialised views) | ⏸ Queued — outline at `docs/milestones/M08_treatment_effectiveness_status.md` |
+| **M09** | Hardware Data Integration | Ingest hardware-generated data (drone surveys, robot telemetry) via clean API. No hardware engineering in this repo. | Site-level survey data (vegetation indices, machine activity) | ⏸ Queued — outline at `docs/milestones/M09_hardware_ingest_status.md` |
+
+**Sequencing rationale:** M04 and M05 are paired — M04 puts tender data into
+the spine; M05's forecast engine is what makes that data load-bearing for
+decisions. M06 is the field-side counterpart that closes the operator loop
+(less time entering, more captured). M07 is the surfacing layer that makes
+the spine externally visible. M08 (the long-form analytics moat) earns
+its keep only after Streams 1 + field-capture have fed it for ≥3 months.
+M09 lands when external hardware data is ready to ingest — engineered
+elsewhere, ingested here.
+
+**Conventions retained from M03b:**
+- One status doc per milestone (`docs/milestones/MXX_*.md`).
+- Executor briefs at `docs/executor_briefs/EXX_<short_name>.md` — written round-by-round.
 - Orchestrator session prompts at `docs/orchestrator_prompts/EXX_session_prompt.md`.
+- Each parallel executor session uses its own `git worktree`.
+- Squash-merge feature PRs with subject `feat(<scope>): <title> (E<N>)`.
 
 ---
 

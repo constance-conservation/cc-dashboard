@@ -36,6 +36,12 @@ performs the merge.
 
 - `E18_session_prompt.md` — Cutover (final M03b brief; ~5 min code + Peter's admin runbook)
 
+## Planning prompts (non-executor)
+
+These prompts spawn planning sessions that produce design docs, not code. No worktree, no PR — single direct push to main per repo convention for docs commits.
+
+- `post_m03b_architecture_session_prompt.md` — Audit current cc-dashboard state, produce integration design for M04–M09. Returns punch list of architectural decisions for Peter's sign-off. Run after M03b round 6 (E18) lands.
+
 ## Archive (merged)
 
 - `E10b_session_prompt.md` — edit mode + image uploads ✅ merged
