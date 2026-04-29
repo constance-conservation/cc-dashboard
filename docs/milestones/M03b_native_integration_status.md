@@ -95,7 +95,7 @@ The 1-line code change is the only PR in round 6. The substance of the cutover i
 
 | # | Step | Status |
 |---|---|---|
-| 1 | Add `CRON_SECRET` to Vercel project env (preview + production) — `openssl rand -hex 32` | ⏸ Pending |
+| 1 | Add `CRON_SECRET` to Vercel project env (preview + production) — `openssl rand -hex 32` | ✅ Done 2026-04-29 (set via Vercel API atomic upsert; verified with `vercel env ls`; same value in Preview + Production) |
 | 2 | Add `SAFETY_CULTURE_API_TOKEN` to Vercel project env (preview + production) — sourced from SC dashboard or password vault | ⏸ Pending |
 | 3 | Re-register SC webhook URL → `https://<cc-dashboard-canonical-domain>/api/webhooks/sc` (events: `inspection.completed`, `inspection.updated`) | ⏸ Pending |
 | 4 | Trigger one cc-dashboard sync to close the ~7-day gap; verify `summary.failed[]` is empty | ⏸ Pending |
