@@ -194,23 +194,27 @@ function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, custom
   }
 
   if (strategy === 'even') {
-    const perMonth = totalAllocation > 0 ? Math.round((totalAllocation / months.length) * 10) / 10 : 0
+    const total = Math.round(totalAllocation)
+    const base = total > 0 ? Math.floor(total / months.length) : 0
+    const remainder = total > 0 ? total % months.length : 0
+    const perMonthValues = months.map((_, i) => i < remainder ? base + 1 : base)
+    const allSame = perMonthValues.every(v => v === perMonthValues[0])
     return (
       <div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
-          {perMonth} {unit} / month × {months.length} months
+          {allSame ? `${perMonthValues[0]} ${unit} / month × ${months.length} months` : `${total} ${unit} over ${months.length} months`}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 4 }}>
-          {months.map(m => (
+          {months.map((m, i) => (
             <div key={m} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', background: 'var(--bg-sunken)', borderRadius: 6 }}>
               <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>{monthLabel(m)}</span>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', marginLeft: 6 }}>{perMonth}</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', marginLeft: 6 }}>{perMonthValues[i]}</span>
             </div>
           ))}
         </div>
-        {totalAllocation > 0 && (
+        {total > 0 && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--line)', fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
-            Total: {totalAllocation} {unit}
+            Total: {total} {unit}
           </div>
         )}
       </div>
@@ -226,9 +230,9 @@ function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, custom
       {months.map(m => (
         <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
           <div style={{ width: 80, fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{monthLabel(m)}</div>
-          <NumericInput className="input" style={{ width: 80 }} min={0}
+          <NumericInput className="input" style={{ width: 80 }} min={0} step={1}
             value={customAllocs[m] ?? 0}
-            onChange={v => onCustomAllocsChange?.({ ...customAllocs, [m]: v })} />
+            onChange={v => onCustomAllocsChange?.({ ...customAllocs, [m]: Math.round(v) })} />
           <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{unit}</span>
         </div>
       ))}
@@ -498,7 +502,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
           </Field>
           <Field label={`Total ${form.unit}`}>
             <NumericInput className="input" value={form.totalAllocation}
-              onChange={v => setForm({ ...form, totalAllocation: v })} min={0} />
+              onChange={v => setForm({ ...form, totalAllocation: Math.round(v) })} min={0} step={1} />
           </Field>
         </div>
 
@@ -536,27 +540,32 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <Field label={
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              Crew type
-              <InfoTooltip text="Fixed: exact head count each day. Range: minimum to maximum. Any: no crew constraint — assign as available." />
-            </span>
-          }>
-            <Select value={form.crewSizeType}
-              onChange={v => setForm({ ...form, crewSizeType: v as CrewSizeType })}
-              options={CREW_TYPE_OPTIONS} />
-          </Field>
-          <Field label={form.crewSizeType === 'range' ? 'Minimum' : 'Crew size'}>
+        <Field label={
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            Crew type
+            <InfoTooltip text="Fixed: exact head count each day. Range: minimum to maximum. Any: no crew constraint — assign as available." />
+          </span>
+        }>
+          <Select value={form.crewSizeType}
+            onChange={v => setForm({ ...form, crewSizeType: v as CrewSizeType })}
+            options={CREW_TYPE_OPTIONS} />
+        </Field>
+
+        {form.crewSizeType === 'range' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <Field label="Minimum">
+              <NumericInput className="input" value={form.minCrew}
+                onChange={v => setForm({ ...form, minCrew: v })} min={1} />
+            </Field>
+            <Field label="Target">
+              <NumericInput className="input" value={form.maxCrew ?? 0}
+                onChange={v => setForm({ ...form, maxCrew: v || undefined })} min={form.minCrew} />
+            </Field>
+          </div>
+        ) : (
+          <Field label="Crew size">
             <NumericInput className="input" value={form.minCrew}
               onChange={v => setForm({ ...form, minCrew: v })} min={1} />
-          </Field>
-        </div>
-
-        {form.crewSizeType === 'range' && (
-          <Field label="Target">
-            <NumericInput className="input" value={form.maxCrew ?? 0}
-              onChange={v => setForm({ ...form, maxCrew: v || undefined })} min={form.minCrew} />
           </Field>
         )}
 
@@ -1188,7 +1197,7 @@ function AddProjectModal({ state, onClose }: {
                   </Field>
                   <Field label={`Total ${a.unit}`}>
                     <NumericInput className="input" value={a.totalAllocation}
-                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, totalAllocation: v } : x))} min={0} />
+                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, totalAllocation: Math.round(v) } : x))} min={0} step={1} />
                   </Field>
                 </div>
                 <Field label="Allocation strategy">
@@ -1299,7 +1308,7 @@ function AddProjectModal({ state, onClose }: {
               </Field>
               <Field label={`Total ${activityForm.unit}`}>
                 <NumericInput className="input" value={activityForm.totalAllocation}
-                  onChange={v => setActivityForm({ ...activityForm, totalAllocation: v })} min={0} />
+                  onChange={v => setActivityForm({ ...activityForm, totalAllocation: Math.round(v) })} min={0} step={1} />
               </Field>
             </div>
             <Field label="Allocation strategy">
@@ -1485,8 +1494,8 @@ function ActivityTypesModal({ state, onClose }: {
                 {state.activityTypes.map(t => (
                   <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--bg-sunken)', borderRadius: 8 }}>
                     {editId === t.id ? (
-                      <>
-                        <div style={{ flex: 1, display: 'flex', gap: 6 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
                           <input className="input" value={editName} onChange={e => setEditName(e.target.value)}
                             onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditId(null) }}
                             autoFocus style={{ flex: 1 }} />
@@ -1495,9 +1504,11 @@ function ActivityTypesModal({ state, onClose }: {
                             onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditId(null) }}
                             style={{ flex: 1 }} />
                         </div>
-                        <button className="btn primary" onClick={commitEdit} style={{ fontSize: 12, padding: '5px 10px' }}>Save</button>
-                        <button className="btn" onClick={() => setEditId(null)} style={{ fontSize: 12, padding: '5px 10px' }}>Cancel</button>
-                      </>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                          <button className="btn primary" onClick={commitEdit} style={{ fontSize: 12, padding: '5px 10px' }}>Save</button>
+                          <button className="btn" onClick={() => setEditId(null)} style={{ fontSize: 12, padding: '5px 10px' }}>Cancel</button>
+                        </div>
+                      </div>
                     ) : (
                       <>
                         <div style={{ flex: 1 }}>
