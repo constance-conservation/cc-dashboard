@@ -28,6 +28,9 @@ import type {
   ProcessingStatus,
   SiteWithStats,
   SitesGlobalData,
+  PipelineHealthData,
+  PipelineIssueRow,
+  SyncState,
 } from './types'
 
 const TOP_N = 8
@@ -898,6 +901,102 @@ export async function getSitesGlobalData(): Promise<SitesGlobalData> {
     mostActiveName: mostActive?.name ?? null,
     mostActiveCount: mostActive?.inspectionCount ?? 0,
     totalHours: Math.round(totalHours),
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E12: Pipeline Health ───────────────────────────────────────────
+
+const PIPELINE_INSPECTIONS_LIMIT = 2000
+const PIPELINE_ISSUES_LIMIT = 20
+
+type RawPipelineInspection = {
+  id: string
+  sc_audit_id: string | null
+  date: string | null
+  sc_template_type: string
+  processing_status: string | null
+}
+
+type RawSyncStateRow = {
+  sync_type: string | null
+  last_sync_at: string | null
+  last_modified_after: string | null
+  high_water_mark: string | null
+  last_cursor: string | null
+  total_synced: number | null
+  last_error: string | null
+}
+
+function templateLabel(t: string): string {
+  if (t === 'daily_work_report') return 'Daily Work Report'
+  if (t === 'chemical_application_record') return 'Chemical Application'
+  return t
+}
+
+export async function getPipelineHealthData(): Promise<PipelineHealthData> {
+  const supabase = await createClient()
+
+  const [inspectionsRes, syncStateRes] = await Promise.all([
+    supabase
+      .from('inspections')
+      .select('id, sc_audit_id, date, sc_template_type, processing_status')
+      .order('date', { ascending: false, nullsFirst: false })
+      .limit(PIPELINE_INSPECTIONS_LIMIT),
+    supabase
+      .from('sync_state')
+      .select('sync_type,last_sync_at,last_modified_after,high_water_mark,last_cursor,total_synced,last_error')
+      .limit(1),
+  ])
+
+  if (inspectionsRes.error) throw new Error(`pipeline inspections query failed: ${inspectionsRes.error.message}`)
+  if (syncStateRes.error) throw new Error(`sync_state query failed: ${syncStateRes.error.message}`)
+
+  const inspections = (inspectionsRes.data ?? []) as RawPipelineInspection[]
+
+  const statusCounts = countBy(
+    inspections as unknown as Record<string, unknown>[],
+    'processing_status',
+  ) as StatusCounts
+
+  const templateCounts = countBy(
+    inspections as unknown as Record<string, unknown>[],
+    'sc_template_type',
+  )
+  const templateBars: LabelValue[] = Object.entries(templateCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, value]) => ({ label: templateLabel(label), value }))
+
+  const issues: PipelineIssueRow[] = inspections
+    .filter(i => i.processing_status === 'failed' || i.processing_status === 'needs_review')
+    .slice(0, PIPELINE_ISSUES_LIMIT)
+    .map(i => ({
+      id: i.id,
+      auditId: i.sc_audit_id,
+      date: i.date,
+      templateType: i.sc_template_type as InspectionTemplateType,
+      status: (i.processing_status as ProcessingStatus) ?? 'unknown',
+    }))
+
+  const syncRow = (syncStateRes.data ?? [])[0] as RawSyncStateRow | undefined
+  const syncState: SyncState | null = syncRow
+    ? {
+        syncType: syncRow.sync_type,
+        lastSyncAt: syncRow.last_sync_at,
+        lastModifiedAfter: syncRow.last_modified_after,
+        highWaterMark: syncRow.high_water_mark,
+        lastCursor: syncRow.last_cursor,
+        totalSynced: syncRow.total_synced ?? 0,
+        lastError: syncRow.last_error,
+      }
+    : null
+
+  return {
+    totalInspections: inspections.length,
+    statusCounts,
+    templateBars,
+    issues,
+    syncState,
     generatedAt: new Date().toISOString(),
   }
 }
