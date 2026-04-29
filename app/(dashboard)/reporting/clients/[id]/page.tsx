@@ -6,6 +6,8 @@ import { RowCard } from '@/components/reporting/RowCard'
 import { GenerateReportButton } from '@/components/reporting/GenerateReportButton'
 import { CadenceSelector } from '@/components/reporting/CadenceSelector'
 import { EditableField } from '@/components/reporting/EditableField'
+import { AddSiteButton } from '@/components/reporting/AddSiteButton'
+import { DeleteRowMenu } from '@/components/reporting/DeleteRowMenu'
 import { updateClientField } from '@/app/(dashboard)/reporting/clients/actions'
 
 export const dynamic = 'force-dynamic'
@@ -84,9 +86,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
           >
             <div className="panel-title">Sites</div>
-            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
-              {sites.length} site{sites.length === 1 ? '' : 's'}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                {sites.length} site{sites.length === 1 ? '' : 's'}
+              </span>
+              <AddSiteButton clientId={client.id} />
+            </div>
           </div>
           {sites.length === 0 ? (
             <div style={{ padding: 24, textAlign: 'center' }}>
@@ -118,6 +123,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                     {s.zoneCount} zone{s.zoneCount === 1 ? '' : 's'}
                   </span>
                   <GenerateReportButton scope="site" id={s.id} />
+                  <DeleteRowMenu kind="site" id={s.id} />
                 </RowCard>
               ))}
             </div>

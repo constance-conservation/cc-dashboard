@@ -3,6 +3,7 @@ import { Icon } from '@/components/icons/Icon'
 import { getClientsListData } from '@/lib/reporting/queries'
 import { KpiTile } from '@/components/reporting/KpiTile'
 import { ClientCard } from '@/components/reporting/ClientCard'
+import { AddClientButton } from '@/components/reporting/AddClientButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,6 +29,10 @@ export default async function ReportingClientsPage() {
           <KpiTile label="Clients" value={data.clients.length} sub="paying entities" />
           <KpiTile label="Active sites" value={totalSites} sub="across all clients" />
           <KpiTile label="Active zones" value={totalZones} sub="billing units" />
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '6px 0 12px' }}>
+          <AddClientButton />
         </div>
 
         {data.clients.length === 0 ? (

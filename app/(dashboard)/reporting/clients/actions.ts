@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
+import { createClient as createServerClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 const VALID_FREQUENCIES = ['weekly', 'fortnightly', 'monthly', 'quarterly', 'annually'] as const
@@ -20,7 +20,7 @@ export async function setClientReportFrequency(
   if (frequency !== null && !VALID_FREQUENCIES.includes(frequency)) {
     return { ok: false, error: `Invalid frequency: ${frequency}` }
   }
-  const supabase = await createClient()
+  const supabase = await createServerClient()
   const { error } = await supabase
     .from('clients')
     .update({ report_frequency: frequency })
@@ -63,7 +63,7 @@ async function updateClientWithFallback(
   clientId: string,
   patch: Record<string, string | null>,
 ): Promise<ActionResult> {
-  const supabase = await createClient()
+  const supabase = await createServerClient()
   const { error, data } = await supabase
     .from('clients')
     .update(patch)
@@ -130,4 +130,74 @@ export async function updateClientField(
   revalidatePath('/reporting/clients')
   revalidatePath('/clients')
   return { ok: true }
+}
+
+// Single-tenant deployment: resolve the lone organizations row.
+// Mirrors the pattern in lib/store/CCStateContext.tsx (org loaded once at startup).
+async function resolveOrgId(): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const supabase = await createServerClient()
+  const res = await supabase.from('organizations').select('id').limit(1).maybeSingle()
+  if (!res.error && res.data?.id) return { ok: true, id: res.data.id as string }
+  if (res.error && !isAuthRlsError(res.error.message)) {
+    return { ok: false, error: res.error.message }
+  }
+  try {
+    const admin = createAdminClient()
+    const adminRes = await admin.from('organizations').select('id').limit(1).maybeSingle()
+    if (adminRes.error) return { ok: false, error: adminRes.error.message }
+    if (!adminRes.data?.id) return { ok: false, error: 'No organization configured' }
+    return { ok: true, id: adminRes.data.id as string }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error'
+    return { ok: false, error: `Failed to resolve organization: ${msg}` }
+  }
+}
+
+async function insertClientWithFallback(
+  row: Record<string, string | null>,
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const supabase = await createServerClient()
+  const { data, error } = await supabase.from('clients').insert(row).select('id').maybeSingle()
+  if (!error && data?.id) return { ok: true, id: data.id as string }
+  const shouldFallback =
+    (error && isAuthRlsError(error.message)) ||
+    (!error && !data)
+  if (shouldFallback) {
+    try {
+      const admin = createAdminClient()
+      const adminRes = await admin.from('clients').insert(row).select('id').maybeSingle()
+      if (adminRes.error) return { ok: false, error: adminRes.error.message }
+      if (!adminRes.data?.id) return { ok: false, error: 'Insert returned no row' }
+      return { ok: true, id: adminRes.data.id as string }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'unknown error'
+      return { ok: false, error: `Insert blocked by RLS; admin fallback unavailable: ${msg}` }
+    }
+  }
+  return { ok: false, error: error!.message }
+}
+
+export async function createClient(
+  name: string,
+  longName?: string | null,
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const trimmedName = normalize(name)
+  if (trimmedName === null) {
+    return { ok: false, error: 'Short name cannot be empty' }
+  }
+  const trimmedLong = longName === undefined ? null : normalize(longName)
+
+  const orgRes = await resolveOrgId()
+  if (!orgRes.ok) return orgRes
+
+  const insertRes = await insertClientWithFallback({
+    organization_id: orgRes.id,
+    name: trimmedName,
+    long_name: trimmedLong,
+  })
+  if (!insertRes.ok) return insertRes
+
+  revalidatePath('/reporting/clients')
+  revalidatePath('/clients')
+  return { ok: true, id: insertRes.id }
 }
