@@ -28,8 +28,6 @@ function rowToEmployee(r: Record<string, unknown>): Employee {
     email: (r.email as string) ?? '',
     phone: (r.phone as string) ?? '',
     address: (r.address as string) || undefined,
-    homeLat: (r.home_lat as number) ?? undefined,
-    homeLng: (r.home_lng as number) ?? undefined,
   }
 }
 
@@ -162,8 +160,6 @@ function staffPatch(e: Partial<Employee>): Record<string, unknown> {
   if (e.email !== undefined)        row.email           = e.email
   if (e.phone !== undefined)        row.phone           = e.phone
   if (e.address  !== undefined) row.address  = e.address  ?? null
-  if (e.homeLat  !== undefined) row.home_lat = e.homeLat  ?? null
-  if (e.homeLng  !== undefined) row.home_lng = e.homeLng  ?? null
   return row
 }
 
@@ -994,8 +990,6 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           email:           e.email,
           phone:           e.phone,
           address:         e.address  ?? null,
-          home_lat:        e.homeLat  ?? null,
-          home_lng:        e.homeLng  ?? null,
           active:          true,
         })
         .select('id')
