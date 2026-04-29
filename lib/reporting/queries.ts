@@ -1,5 +1,15 @@
 import { createClient } from '@/lib/supabase/server'
-import type { LandingDashboardData, StatusCounts, LabelValue } from './types'
+import type {
+  LandingDashboardData,
+  StatusCounts,
+  LabelValue,
+  ClientsListData,
+  ClientSummary,
+  ClientDetailData,
+  SiteSummary,
+  SiteDetailData,
+  ZoneRow,
+} from './types'
 
 const TOP_N = 8
 
@@ -94,6 +104,227 @@ export async function getLandingDashboardData(): Promise<LandingDashboardData> {
     topTasks,
     topWeeds,
     topStaffHours,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E9: Clients / Sites / Zones queries ────────────────────────────
+
+type RawClient = {
+  id: string
+  name: string
+  long_name: string | null
+  contact_name: string | null
+  council_or_body: string | null
+  contact_email: string | null
+  contact_phone: string | null
+  report_frequency: string | null
+}
+
+type RawSite = {
+  id: string
+  client_id: string | null
+  parent_site_id: string | null
+  name: string
+  long_name: string | null
+  canonical_name: string | null
+  site_type: string | null
+  project_code: string | null
+}
+
+function compareByDisplayName(a: { longName: string | null; name: string }, b: { longName: string | null; name: string }): number {
+  const an = (a.longName || a.name).toLocaleLowerCase()
+  const bn = (b.longName || b.name).toLocaleLowerCase()
+  return an < bn ? -1 : an > bn ? 1 : 0
+}
+
+export async function getClientsListData(): Promise<ClientsListData> {
+  const supabase = await createClient()
+
+  const [clientsRes, sitesRes] = await Promise.all([
+    supabase
+      .from('clients')
+      .select('id,name,long_name,contact_name,council_or_body,contact_email,contact_phone,report_frequency'),
+    supabase
+      .from('sites')
+      .select('id,client_id,parent_site_id'),
+  ])
+
+  if (clientsRes.error) throw new Error(`clients query failed: ${clientsRes.error.message}`)
+  if (sitesRes.error) throw new Error(`sites query failed: ${sitesRes.error.message}`)
+
+  const rawClients = (clientsRes.data ?? []) as RawClient[]
+  const rawSites = (sitesRes.data ?? []) as Pick<RawSite, 'id' | 'client_id' | 'parent_site_id'>[]
+
+  const topLevelSitesByClient = new Map<string, string[]>()
+  const childCountByParent = new Map<string, number>()
+  for (const s of rawSites) {
+    if (s.parent_site_id) {
+      childCountByParent.set(s.parent_site_id, (childCountByParent.get(s.parent_site_id) ?? 0) + 1)
+    } else if (s.client_id) {
+      const arr = topLevelSitesByClient.get(s.client_id) ?? []
+      arr.push(s.id)
+      topLevelSitesByClient.set(s.client_id, arr)
+    }
+  }
+
+  const clients: ClientSummary[] = rawClients.map(c => {
+    const topLevelSiteIds = topLevelSitesByClient.get(c.id) ?? []
+    const zoneCount = topLevelSiteIds.reduce((acc, sid) => acc + (childCountByParent.get(sid) ?? 0), 0)
+    return {
+      id: c.id,
+      name: c.name,
+      longName: c.long_name,
+      contactName: c.contact_name,
+      councilOrBody: c.council_or_body,
+      reportFrequency: c.report_frequency,
+      siteCount: topLevelSiteIds.length,
+      zoneCount,
+    }
+  }).sort(compareByDisplayName)
+
+  return {
+    clients,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+export async function getClientDetailData(clientId: string): Promise<ClientDetailData | null> {
+  const supabase = await createClient()
+
+  const [clientRes, sitesRes] = await Promise.all([
+    supabase
+      .from('clients')
+      .select('id,name,long_name,contact_name,council_or_body,contact_email,contact_phone,report_frequency')
+      .eq('id', clientId)
+      .maybeSingle(),
+    supabase
+      .from('sites')
+      .select('id,client_id,parent_site_id,name,long_name')
+      .eq('client_id', clientId),
+  ])
+
+  if (clientRes.error) throw new Error(`client query failed: ${clientRes.error.message}`)
+  if (sitesRes.error) throw new Error(`sites query failed: ${sitesRes.error.message}`)
+  if (!clientRes.data) return null
+
+  const c = clientRes.data as RawClient
+  const allSites = (sitesRes.data ?? []) as Pick<RawSite, 'id' | 'parent_site_id' | 'name' | 'long_name'>[]
+
+  const childCountByParent = new Map<string, number>()
+  for (const s of allSites) {
+    if (s.parent_site_id) {
+      childCountByParent.set(s.parent_site_id, (childCountByParent.get(s.parent_site_id) ?? 0) + 1)
+    }
+  }
+
+  const sites: SiteSummary[] = allSites
+    .filter(s => !s.parent_site_id)
+    .map(s => ({
+      id: s.id,
+      name: s.name,
+      longName: s.long_name,
+      zoneCount: childCountByParent.get(s.id) ?? 0,
+    }))
+    .sort(compareByDisplayName)
+
+  return {
+    client: {
+      id: c.id,
+      name: c.name,
+      longName: c.long_name,
+      contactName: c.contact_name,
+      councilOrBody: c.council_or_body,
+      contactEmail: c.contact_email,
+      contactPhone: c.contact_phone,
+      reportFrequency: c.report_frequency,
+    },
+    sites,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+export async function getSiteDetailData(siteId: string): Promise<SiteDetailData | null> {
+  const supabase = await createClient()
+
+  const siteRes = await supabase
+    .from('sites')
+    .select('id,client_id,parent_site_id,name,long_name,canonical_name,site_type,project_code')
+    .eq('id', siteId)
+    .maybeSingle()
+
+  if (siteRes.error) throw new Error(`site query failed: ${siteRes.error.message}`)
+  if (!siteRes.data) return null
+
+  const s = siteRes.data as RawSite
+  if (!s.client_id) return null
+
+  const [clientRes, zonesRes] = await Promise.all([
+    supabase
+      .from('clients')
+      .select('id,name,long_name')
+      .eq('id', s.client_id)
+      .maybeSingle(),
+    supabase
+      .from('sites')
+      .select('id,name,long_name,canonical_name')
+      .eq('parent_site_id', siteId),
+  ])
+
+  if (clientRes.error) throw new Error(`client query failed: ${clientRes.error.message}`)
+  if (zonesRes.error) throw new Error(`zones query failed: ${zonesRes.error.message}`)
+
+  const zoneRows = (zonesRes.data ?? []) as Pick<RawSite, 'id' | 'name' | 'long_name' | 'canonical_name'>[]
+  const zoneIds = zoneRows.map(z => z.id)
+
+  let zones: ZoneRow[] = zoneRows.map(z => ({
+    id: z.id,
+    name: z.name,
+    longName: z.long_name,
+    canonicalName: z.canonical_name,
+    inspectionCount: 0,
+    lastInspectionDate: null,
+  }))
+
+  if (zoneIds.length > 0) {
+    const inspRes = await supabase
+      .from('inspections')
+      .select('site_id,date')
+      .in('site_id', zoneIds)
+    if (inspRes.error) throw new Error(`inspections query failed: ${inspRes.error.message}`)
+    const inspections = (inspRes.data ?? []) as { site_id: string; date: string | null }[]
+    const countByZone = new Map<string, number>()
+    const latestByZone = new Map<string, string>()
+    for (const i of inspections) {
+      countByZone.set(i.site_id, (countByZone.get(i.site_id) ?? 0) + 1)
+      if (i.date) {
+        const prev = latestByZone.get(i.site_id)
+        if (!prev || i.date > prev) latestByZone.set(i.site_id, i.date)
+      }
+    }
+    zones = zones.map(z => ({
+      ...z,
+      inspectionCount: countByZone.get(z.id) ?? 0,
+      lastInspectionDate: latestByZone.get(z.id) ?? null,
+    }))
+  }
+
+  zones.sort(compareByDisplayName)
+
+  const clientRow = clientRes.data as Pick<RawClient, 'id' | 'name' | 'long_name'> | null
+
+  return {
+    site: {
+      id: s.id,
+      clientId: s.client_id,
+      name: s.name,
+      longName: s.long_name,
+      siteType: s.site_type,
+      projectCode: s.project_code,
+    },
+    clientName: clientRow?.name ?? 'Unknown client',
+    clientLongName: clientRow?.long_name ?? null,
+    zones,
     generatedAt: new Date().toISOString(),
   }
 }
