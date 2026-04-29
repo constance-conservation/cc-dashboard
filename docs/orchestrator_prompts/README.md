@@ -32,17 +32,19 @@ the prompt body into the first message. The instance:
 The orchestrator (the main Claude Code session) reviews each PR and
 performs the merge.
 
-## Active prompts (round 3)
+## Active prompts (round 4)
 
-- `E12_session_prompt.md` — Pipeline Health page (½ day)
-- `E14_session_prompt.md` — Global Sites view (½ day; adds new sub-nav entry)
-- `E15_session_prompt.md` — Inline CRUD across reporting views (full day)
+- `E15b_session_prompt.md` — Add/delete sites + zones + new client (½ day)
+- `E16_session_prompt.md` — Generation pipeline full port + tests + Vercel Cron (~2 days)
 
 ## Archive (merged)
 
 - `E10b_session_prompt.md` — edit mode + image uploads ✅ merged
 - `E11_session_prompt.md` — Inspections page ✅ merged
 - `E13_session_prompt.md` — Operations 3 pages ✅ merged
+- `E12_session_prompt.md` — Pipeline Health page ✅ merged
+- `E14_session_prompt.md` — Global Sites view ✅ merged
+- `E15_session_prompt.md` — Inline CRUD across reporting views ✅ merged
 
 ## Worktree pattern (round 3+)
 
