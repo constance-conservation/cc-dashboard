@@ -9,7 +9,7 @@ import { Select } from '@/components/dashboard/Select'
 import { NumericInput } from '@/components/dashboard/NumericInput'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import type { RosterAssignment, Activity, Employee, ActivityCarryover, CarryoverStatus } from '@/lib/types'
-import { DAY_KEYS, type DayKey, dateKey, weekdayIdx, weekdayName, computeMonthlyTarget, detectUnderstaffing, autoGenerate } from '@/lib/rostering/engine'
+import { DAY_KEYS, type DayKey, dateKey, weekdayIdx, weekdayName, parseDate, computeMonthlyTarget, detectUnderstaffing, autoGenerate } from '@/lib/rostering/engine'
 
 function daysInMonth(ym: string) {
   const [y, m] = ym.split('-').map(Number)
@@ -130,7 +130,6 @@ function CalDay({ day, ym, state, onOpen }: {
     <div className={`cal-cell${isPast ? ' cal-cell-past' : ''}`} onClick={onOpen}>
       <div className="cal-date">
         {day}
-        {isPast && <span className="cal-lock">🔒</span>}
       </div>
       {Object.keys(byProject).length === 0 && (
         <div className="cal-empty-label">— no assignments —</div>
@@ -375,12 +374,150 @@ function RulesModal({ onClose }: { onClose: () => void }) {
   )
 }
 
+// ── Projects drawer ───────────────────────────────────────────────────────────
+
+function ProjectsDrawer({ state, rosterMonth, activityVisits, onClose }: {
+  state: ReturnType<typeof useCCState>
+  rosterMonth: string
+  activityVisits: Record<string, number>
+  onClose: () => void
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  const [y, m] = rosterMonth.split('-').map(Number)
+  const monthStart = new Date(y, m - 1, 1)
+  const monthEnd   = new Date(y, m, 0)
+
+  const activeProjects = useMemo(() =>
+    state.projects.filter(p => {
+      if (!p.start || !p.end) return false
+      return parseDate(p.start) <= monthEnd && parseDate(p.end) >= monthStart
+    }),
+    [state.projects, rosterMonth]
+  )
+
+  const projectActivities = useMemo(() => {
+    const map = new Map<string, Array<{ activity: Activity; target: number }>>()
+    for (const p of activeProjects) {
+      const items = state.activities
+        .filter(a => a.projectId === p.id && a.status === 'active')
+        .map(a => ({ activity: a, target: computeMonthlyTarget(a, rosterMonth, state.allocations) }))
+        .filter(x => x.target > 0)
+      map.set(p.id, items)
+    }
+    return map
+  }, [activeProjects, state.activities, state.allocations, rosterMonth])
+
+  const toggle = (pid: string) =>
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.has(pid) ? next.delete(pid) : next.add(pid)
+      return next
+    })
+
+  const monthName = new Date(y, m - 1, 1).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })
+
+  return (
+    <Drawer
+      title="Projects"
+      subtitle={`${activeProjects.length} active in ${monthName}`}
+      onClose={onClose}
+      saveLabel="Done"
+      onSave={onClose}
+    >
+      {activeProjects.length === 0 && (
+        <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>No active projects this month.</div>
+      )}
+      {activeProjects.map(project => {
+        const items      = projectActivities.get(project.id) ?? []
+        const isExpanded = expanded.has(project.id)
+        return (
+          <div key={project.id} style={{ marginBottom: 8 }}>
+            <button
+              onClick={() => toggle(project.id)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                padding: '10px 12px', background: 'var(--bg-sunken)',
+                border: '1px solid var(--line)',
+                borderRadius: isExpanded ? '8px 8px 0 0' : 8,
+                cursor: 'pointer', textAlign: 'left',
+              }}
+            >
+              <span style={{
+                fontSize: 9, color: 'var(--ink-3)',
+                display: 'inline-block', transition: 'transform 0.15s',
+                transform: isExpanded ? 'rotate(90deg)' : 'none',
+              }}>▶</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{project.name}</div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 2 }}>
+                  {items.length > 0
+                    ? `${items.length} activit${items.length !== 1 ? 'ies' : 'y'} scheduled`
+                    : 'No activities allocated this month'}
+                </div>
+              </div>
+            </button>
+            {isExpanded && (
+              <div style={{ border: '1px solid var(--line)', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+                {items.length === 0 ? (
+                  <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--ink-3)', background: 'var(--bg-elev)' }}>
+                    No activities with allocation this month.
+                  </div>
+                ) : (
+                  items.map(({ activity: act, target }, i) => {
+                    const monthVisits  = activityVisits[act.id] || 0
+                    const monthPct     = target > 0 ? Math.min(100, Math.round(monthVisits / target * 100)) : 0
+                    const overallPct   = act.totalAllocation > 0
+                      ? Math.min(100, Math.round(act.unitsCompleted / act.totalAllocation * 100))
+                      : 0
+                    return (
+                      <div key={act.id} style={{
+                        padding: '12px 14px', background: 'var(--bg-elev)',
+                        borderTop: i > 0 ? '1px solid var(--line)' : 'none',
+                      }}>
+                        <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 10 }}>{act.name}</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                          {/* This month */}
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>This month</span>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-2)' }}>{monthVisits}/{target} visits</span>
+                            </div>
+                            <div style={{ height: 3, background: 'var(--bg-sunken)', borderRadius: 2 }}>
+                              <div style={{ height: '100%', width: monthPct + '%', background: monthPct >= 100 ? 'var(--ok)' : 'var(--accent)', borderRadius: 2 }} />
+                            </div>
+                          </div>
+                          {/* Overall */}
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Overall</span>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-2)' }}>{act.unitsCompleted}/{act.totalAllocation} {act.unit}</span>
+                            </div>
+                            <div style={{ height: 3, background: 'var(--bg-sunken)', borderRadius: 2 }}>
+                              <div style={{ height: '100%', width: overallPct + '%', background: overallPct >= 100 ? 'var(--ok)' : 'var(--ink-3)', borderRadius: 2 }} />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </Drawer>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function RosteringPage() {
   const state = useCCState()
   const [selectedDay, setSelectedDay]                 = useState<number | null>(null)
   const [showHelp, setShowHelp]                       = useState(false)
+  const [showProjects, setShowProjects]               = useState(false)
   const [confirmAction, setConfirmAction]             = useState<'autogen' | 'clear' | null>(null)
   const [showCarryoverReview, setShowCarryoverReview] = useState(false)
   const [reviewEntries, setReviewEntries]             = useState<ReviewEntry[]>([])
@@ -411,15 +548,6 @@ export default function RosteringPage() {
     }
     return { totalShifts, uniqueStaff: uniqueStaff.size, activityVisits }
   }, [state.roster, state.rosterMonth])
-
-  // ── KPI: active activities that have a target this month ───────────────────
-  const activeActivityTargets = useMemo(() =>
-    state.activities
-      .filter(a => a.status === 'active')
-      .map(a => ({ activity: a, target: computeMonthlyTarget(a, state.rosterMonth) }))
-      .filter(x => x.target > 0),
-    [state.activities, state.rosterMonth]
-  )
 
   // ── Auto-generate helpers ──────────────────────────────────────────────────
 
@@ -544,6 +672,7 @@ export default function RosteringPage() {
           <button className="btn primary" onClick={handleAutoGen}><Icon name="cloud" size={14} /> Auto-generate</button>
           <button className="btn" onClick={() => setConfirmAction('clear')}>Clear month</button>
           <button className="btn" onClick={() => setShowHelp(true)}>Rules</button>
+          <button className="btn" onClick={() => setShowProjects(true)}>Projects</button>
           <div style={{ flex: 1 }} />
           <button className="btn" onClick={prevMonth}>←</button>
           <div className="chip" style={{ fontFamily: 'var(--font-display)', fontSize: 16, height: 32, padding: '0 14px', textTransform: 'none', letterSpacing: '-0.01em' }}>
@@ -551,47 +680,6 @@ export default function RosteringPage() {
           </div>
           <button className="btn" onClick={nextMonth}>→</button>
         </div>
-
-        {/* Activity KPI grouped by project */}
-        {activeActivityTargets.length > 0 && (() => {
-          const byProject = new Map<string, Array<{ activity: Activity; target: number }>>()
-          activeActivityTargets.forEach(item => {
-            const list = byProject.get(item.activity.projectId) ?? []
-            list.push(item)
-            byProject.set(item.activity.projectId, list)
-          })
-          return (
-            <div style={{ marginBottom: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {[...byProject.entries()].map(([pid, items]) => {
-                const project = state.projects.find(p => p.id === pid)
-                return (
-                  <div key={pid}>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
-                      {project?.name ?? 'Unknown project'}
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
-                      {items.map(({ activity: act, target }) => {
-                        const visits = stats.activityVisits[act.id] || 0
-                        const pct    = target > 0 ? Math.min(100, Math.round(visits / target * 100)) : 0
-                        return (
-                          <div key={act.id} style={{ padding: 14, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10 }}>
-                            <div style={{ fontSize: 12, fontWeight: 500, letterSpacing: '-0.005em', marginBottom: 6 }}>{act.name}</div>
-                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
-                              {visits}/{target} visits · {act.unit}
-                            </div>
-                            <div style={{ height: 4, background: 'var(--bg-sunken)', borderRadius: 2 }}>
-                              <div style={{ height: '100%', width: pct + '%', background: pct >= 100 ? 'var(--ok)' : 'var(--accent)', borderRadius: 2 }} />
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )
-        })()}
 
         {/* Calendar */}
         <div className="cal">
@@ -612,6 +700,14 @@ export default function RosteringPage() {
         <DayEditor day={selectedDay} ym={state.rosterMonth} state={state} onClose={() => setSelectedDay(null)} />
       )}
       {showHelp && <RulesModal onClose={() => setShowHelp(false)} />}
+      {showProjects && (
+        <ProjectsDrawer
+          state={state}
+          rosterMonth={state.rosterMonth}
+          activityVisits={stats.activityVisits}
+          onClose={() => setShowProjects(false)}
+        />
+      )}
 
       {showCarryoverReview && (
         <CarryoverReviewModal
