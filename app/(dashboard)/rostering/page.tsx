@@ -552,28 +552,46 @@ export default function RosteringPage() {
           <button className="btn" onClick={nextMonth}>→</button>
         </div>
 
-        {/* Activity KPI mini-cards */}
-        {activeActivityTargets.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginBottom: 18 }}>
-            {activeActivityTargets.slice(0, 8).map(({ activity: act, target }) => {
-              const project = state.projects.find(p => p.id === act.projectId)
-              const visits  = stats.activityVisits[act.id] || 0
-              const pct     = target > 0 ? Math.min(100, Math.round(visits / target * 100)) : 0
-              return (
-                <div key={act.id} style={{ padding: 14, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10 }}>
-                  <div style={{ fontSize: 12, fontWeight: 500, letterSpacing: '-0.005em', marginBottom: 1 }}>{act.name}</div>
-                  <div style={{ fontSize: 10, color: 'var(--ink-4)', marginBottom: 4 }}>{project?.name}</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
-                    {visits}/{target} visits · {act.unit}
+        {/* Activity KPI grouped by project */}
+        {activeActivityTargets.length > 0 && (() => {
+          const byProject = new Map<string, Array<{ activity: Activity; target: number }>>()
+          activeActivityTargets.forEach(item => {
+            const list = byProject.get(item.activity.projectId) ?? []
+            list.push(item)
+            byProject.set(item.activity.projectId, list)
+          })
+          return (
+            <div style={{ marginBottom: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {[...byProject.entries()].map(([pid, items]) => {
+                const project = state.projects.find(p => p.id === pid)
+                return (
+                  <div key={pid}>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+                      {project?.name ?? 'Unknown project'}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
+                      {items.map(({ activity: act, target }) => {
+                        const visits = stats.activityVisits[act.id] || 0
+                        const pct    = target > 0 ? Math.min(100, Math.round(visits / target * 100)) : 0
+                        return (
+                          <div key={act.id} style={{ padding: 14, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10 }}>
+                            <div style={{ fontSize: 12, fontWeight: 500, letterSpacing: '-0.005em', marginBottom: 6 }}>{act.name}</div>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                              {visits}/{target} visits · {act.unit}
+                            </div>
+                            <div style={{ height: 4, background: 'var(--bg-sunken)', borderRadius: 2 }}>
+                              <div style={{ height: '100%', width: pct + '%', background: pct >= 100 ? 'var(--ok)' : 'var(--accent)', borderRadius: 2 }} />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
-                  <div style={{ height: 4, background: 'var(--bg-sunken)', borderRadius: 2 }}>
-                    <div style={{ height: '100%', width: pct + '%', background: pct >= 100 ? 'var(--ok)' : 'var(--accent)', borderRadius: 2 }} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
+                )
+              })}
+            </div>
+          )
+        })()}
 
         {/* Calendar */}
         <div className="cal">
