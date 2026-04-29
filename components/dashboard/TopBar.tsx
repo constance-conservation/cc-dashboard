@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useState, useRef, useEffect } from 'react'
+import { usePathname } from 'next/navigation'
 import { Icon } from '@/components/icons/Icon'
 import { useSettings } from '@/lib/store/SettingsContext'
 
@@ -10,6 +11,7 @@ export function TopBar() {
   const [showSettings, setShowSettings] = useState<boolean>(false)
   const settingsRef = useRef<HTMLDivElement>(null)
   const { settings, setSetting } = useSettings()
+  const pathname = usePathname()
 
   const toggleMode = () => {
     const next = mode === 'light' ? 'dark' : 'light'
@@ -67,28 +69,30 @@ export function TopBar() {
                   Settings
                 </div>
               </div>
-              <div style={{ padding: '12px 16px' }}>
-                <div style={{
-                  fontFamily: 'var(--font-mono)', fontSize: 10,
-                  textTransform: 'uppercase', letterSpacing: '0.06em',
-                  color: 'var(--ink-3)', marginBottom: 8,
-                }}>
-                  Dashboard Layout
+              {pathname === '/' && (
+                <div style={{ padding: '12px 16px' }}>
+                  <div style={{
+                    fontFamily: 'var(--font-mono)', fontSize: 10,
+                    textTransform: 'uppercase', letterSpacing: '0.06em',
+                    color: 'var(--ink-3)', marginBottom: 8,
+                  }}>
+                    Dashboard Layout
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {(['grid', 'list'] as const).map(l => (
+                      <button key={l} onClick={() => setSetting('dashboardLayout', l)} style={{
+                        flex: 1, padding: '6px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+                        fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.04em',
+                        background: settings.dashboardLayout === l ? 'var(--accent-soft)' : 'var(--bg-sunken)',
+                        color: settings.dashboardLayout === l ? 'var(--accent)' : 'var(--ink-3)',
+                        border: '1px solid ' + (settings.dashboardLayout === l ? 'var(--accent)' : 'transparent'),
+                      }}>
+                        {l === 'grid' ? 'Cards' : 'List'}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {(['grid', 'list'] as const).map(l => (
-                    <button key={l} onClick={() => setSetting('dashboardLayout', l)} style={{
-                      flex: 1, padding: '6px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
-                      fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.04em',
-                      background: settings.dashboardLayout === l ? 'var(--accent-soft)' : 'var(--bg-sunken)',
-                      color: settings.dashboardLayout === l ? 'var(--accent)' : 'var(--ink-3)',
-                      border: '1px solid ' + (settings.dashboardLayout === l ? 'var(--accent)' : 'transparent'),
-                    }}>
-                      {l === 'grid' ? 'Cards' : 'List'}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              )}
             </div>
           )}
         </div>

@@ -43,7 +43,6 @@ export function Drawer({ title, subtitle, children, onClose, onSave, onDelete, o
               <Icon name="unarchive" size={12} /> Restore
             </button>
           )}
-          <div style={{ flex: 1 }} />
           <button className="btn" onClick={onClose}>Cancel</button>
           {onSave && <button className="btn primary" onClick={onSave} disabled={saveDisabled}>{saveLabel}</button>}
         </div>
