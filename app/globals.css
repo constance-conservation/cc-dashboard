@@ -399,3 +399,53 @@ input, select, textarea { font-family: inherit; font-size: inherit; color: inher
 /* ── Leaflet ───────────────────────────────────────────────── */
 @keyframes pulse { 0% { transform: scale(1); opacity: 0.6; } 50% { transform: scale(1.8); opacity: 0; } 100% { transform: scale(1); opacity: 0; } }
 .leaflet-container { background: var(--bg-sunken) !important; }
+
+/* ── Reporting (E8: Pipeline Dashboard primitives) ─────────── */
+.kpi-sub { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+
+.alert-bar {
+  background: oklch(0.62 0.12 55 / 0.08); border-left: 3px solid var(--warn);
+  border-radius: var(--radius-lg); padding: 14px 20px; margin-bottom: 24px;
+  display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2);
+}
+
+.bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.bar-label {
+  width: 140px; font-size: 12px; color: var(--ink-2);
+  text-align: right; flex-shrink: 0; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.bar-track { flex: 1; height: 6px; background: var(--bg-sunken); border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.8s ease; }
+.bar-fill.clay, .bar-fill.amber, .bar-fill.caramel { background: var(--accent); }
+.bar-fill.sage { background: var(--ok); }
+.bar-fill.steel { background: var(--ink-3); }
+.bar-fill.stone { background: var(--ink-4); }
+.bar-fill.terracotta { background: var(--danger); }
+.bar-count {
+  width: 50px; font-family: var(--font-mono), monospace; font-size: 12px; font-weight: 500;
+  font-variant-numeric: tabular-nums; color: var(--ink);
+}
+
+.donut-container { display: flex; align-items: center; gap: 24px; }
+.donut { width: 120px; height: 120px; border-radius: 50%; position: relative; flex-shrink: 0; }
+.donut-center {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 80px; height: 80px; background: var(--bg-elev); border-radius: 50%;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+}
+.donut-center .value {
+  font-family: var(--font-display), sans-serif; font-size: 24px; font-weight: 400;
+  font-variant-numeric: tabular-nums; color: var(--ink); letter-spacing: -0.02em;
+}
+.donut-center .label {
+  font-family: var(--font-mono), monospace; font-size: 9px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--ink-3);
+}
+.donut-legend { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.legend-count {
+  font-family: var(--font-mono), monospace; font-weight: 500; font-variant-numeric: tabular-nums;
+  margin-left: auto; color: var(--ink); min-width: 36px; text-align: right;
+}
