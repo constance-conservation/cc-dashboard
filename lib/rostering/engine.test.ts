@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseDate, computeMonthlyTarget, autoGenerate, weekdayIdx, weekdayName, getProjectsWithActivitiesOnDay } from './engine'
+import { parseDate, computeMonthlyTarget, computeHoursRemainder, autoGenerate, weekdayIdx, weekdayName, getProjectsWithActivitiesOnDay } from './engine'
 import type { Activity, Employee, Project, ActivityAllocation } from '@/lib/types'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -145,6 +145,56 @@ describe('computeMonthlyTarget', () => {
     const a = makeActivity({ allocationStrategy: 'custom', totalAllocation: 3 })
     expect(computeMonthlyTarget(a, '2026-05', [])).toBeGreaterThan(0)
   })
+
+  it('custom_date: counts date-specific allocations in the month', () => {
+    const a = makeActivity({ allocationStrategy: 'custom_date' })
+    const allocs: ActivityAllocation[] = [
+      { id: 'a1', activityId: 'act-1', period: '2026-04-07', allocation: 1 },
+      { id: 'a2', activityId: 'act-1', period: '2026-04-14', allocation: 1 },
+      { id: 'a3', activityId: 'act-1', period: '2026-05-01', allocation: 1 },
+    ]
+    expect(computeMonthlyTarget(a, '2026-04', allocs)).toBe(2)
+    expect(computeMonthlyTarget(a, '2026-05', allocs)).toBe(1)
+    expect(computeMonthlyTarget(a, '2026-06', allocs)).toBe(0)
+  })
+
+  it('custom_date: returns 0 when no allocations provided', () => {
+    const a = makeActivity({ allocationStrategy: 'custom_date' })
+    expect(computeMonthlyTarget(a, '2026-04', [])).toBe(0)
+  })
+
+  it('hours-even: allocates in full-day multiples — 24h over 3 months = 1 visit/month', () => {
+    const a = makeActivity({ unit: 'hours', totalAllocation: 24 })
+    expect(computeMonthlyTarget(a, '2026-04')).toBe(1)
+    expect(computeMonthlyTarget(a, '2026-05')).toBe(1)
+    expect(computeMonthlyTarget(a, '2026-06')).toBe(1)
+  })
+
+  it('hours-even: floors to full days — 20h over 3 months gives 2 visits total', () => {
+    const a = makeActivity({ unit: 'hours', totalAllocation: 20 })
+    const apr = computeMonthlyTarget(a, '2026-04')
+    const may = computeMonthlyTarget(a, '2026-05')
+    const jun = computeMonthlyTarget(a, '2026-06')
+    expect(apr + may + jun).toBe(2)
+  })
+})
+
+// ── computeHoursRemainder ─────────────────────────────────────────────────────
+
+describe('computeHoursRemainder', () => {
+  it('returns 0 when unit is days', () => {
+    expect(computeHoursRemainder(makeActivity({ unit: 'days', totalAllocation: 7 }))).toBe(0)
+  })
+
+  it('returns 0 when strategy is not even', () => {
+    expect(computeHoursRemainder(makeActivity({ unit: 'hours', allocationStrategy: 'custom', totalAllocation: 7 }))).toBe(0)
+  })
+
+  it('returns remainder hours for even-spread hours activity', () => {
+    expect(computeHoursRemainder(makeActivity({ unit: 'hours', totalAllocation: 20 }))).toBe(4)
+    expect(computeHoursRemainder(makeActivity({ unit: 'hours', totalAllocation: 16 }))).toBe(0)
+    expect(computeHoursRemainder(makeActivity({ unit: 'hours', totalAllocation: 25 }))).toBe(1)
+  })
 })
 
 // ── autoGenerate ──────────────────────────────────────────────────────────────
@@ -244,6 +294,28 @@ describe('autoGenerate', () => {
       const wd = new Date(2026, 3, day).getDay()
       expect(wd).toBe(1) // only Mondays
     }
+  })
+
+  it('custom_date: only schedules on exact dates that have allocations', () => {
+    const activity = makeActivity({ allocationStrategy: 'custom_date' })
+    const employee = makeEmployee()
+    // 2026-04-07 is Tuesday, 2026-04-14 is Tuesday — both within default activity range
+    const allocs: ActivityAllocation[] = [
+      { id: 'a1', activityId: 'act-1', period: '2026-04-07', allocation: 1 },
+      { id: 'a2', activityId: 'act-1', period: '2026-04-14', allocation: 1 },
+    ]
+    const result = autoGenerate([activity], [employee], '2026-04', new Set(), allocs)
+    const scheduledDays = Object.keys(result).sort()
+    expect(scheduledDays).toContain('2026-04-07')
+    expect(scheduledDays).toContain('2026-04-14')
+    expect(scheduledDays.length).toBe(2)
+  })
+
+  it('custom_date: returns empty roster when no date allocations provided', () => {
+    const activity = makeActivity({ allocationStrategy: 'custom_date' })
+    const employee = makeEmployee()
+    const result = autoGenerate([activity], [employee], '2026-04', new Set(), [])
+    expect(result).toEqual({})
   })
 })
 

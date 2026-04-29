@@ -11,6 +11,7 @@ import { NumericInput } from '@/components/dashboard/NumericInput'
 import { InfoTooltip } from '@/components/dashboard/InfoTooltip'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import type { Project, Site, Activity, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus, ActivityType } from '@/lib/types'
+import { DAY_HOURS } from '@/lib/rostering/engine'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ const UNIT_OPTIONS = [
 const ALLOCATION_OPTIONS = [
   { value: 'even', label: 'Even spread' },
   { value: 'custom', label: 'Custom (per month)' },
+  { value: 'custom_date', label: 'Custom (specific dates)' },
 ]
 const CREW_TYPE_OPTIONS = [
   { value: 'fixed', label: 'Fixed' },
@@ -214,33 +216,49 @@ function ZoneSearchDropdown({ linkedIds, allOrgSites, onLink, onCreateAndLink }:
 
 // ── AllocationSpreadPanel ─────────────────────────────────────────────────────
 
-function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, customAllocs, onCustomAllocsChange }: {
+function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, customAllocs, onCustomAllocsChange, activityStart, activityEnd }: {
   strategy: AllocationStrategy
   months: string[]
   totalAllocation: number
   unit: WorkUnit
   customAllocs: Record<string, number>
   onCustomAllocsChange?: (allocs: Record<string, number>) => void
+  activityStart?: string
+  activityEnd?: string
 }) {
   const monthLabel = (m: string) => {
     const [y, mo] = m.split('-')
     return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })
   }
 
-  if (months.length === 0) {
+  if (months.length === 0 && strategy !== 'custom_date') {
     return <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>Set start and end dates to see allocation spread</div>
   }
 
   if (strategy === 'even') {
     const total = Math.round(totalAllocation)
-    const base = total > 0 ? Math.floor(total / months.length) : 0
-    const remainder = total > 0 ? total % months.length : 0
-    const perMonthValues = months.map((_, i) => i < remainder ? base + 1 : base)
+    let perMonthValues: number[]
+    let remainderHours: number | null = null
+
+    if (unit === 'hours') {
+      const fullDays = Math.floor(total / DAY_HOURS)
+      const rem = total % DAY_HOURS
+      if (rem > 0) remainderHours = rem
+      const dBase = fullDays > 0 ? Math.floor(fullDays / months.length) : 0
+      const dExtras = fullDays > 0 ? fullDays % months.length : 0
+      perMonthValues = months.map((_, i) => (i < dExtras ? dBase + 1 : dBase) * DAY_HOURS)
+    } else {
+      const base = total > 0 ? Math.floor(total / months.length) : 0
+      const rem = total > 0 ? total % months.length : 0
+      perMonthValues = months.map((_, i) => i < rem ? base + 1 : base)
+    }
+
     const allSame = perMonthValues.every(v => v === perMonthValues[0])
+    const scheduledTotal = perMonthValues.reduce((s, v) => s + v, 0)
     return (
       <div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
-          {allSame ? `${perMonthValues[0]} ${unit} / month × ${months.length} months` : `${total} ${unit} over ${months.length} months`}
+          {allSame ? `${perMonthValues[0]} ${unit} / month × ${months.length} months` : `${scheduledTotal} ${unit} over ${months.length} months`}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 4 }}>
           {months.map((m, i) => (
@@ -252,7 +270,54 @@ function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, custom
         </div>
         {total > 0 && (
           <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--line)', fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
-            Total: {total} {unit}
+            Total: {scheduledTotal} {unit}
+          </div>
+        )}
+        {remainderHours !== null && (
+          <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 6 }}>
+            {remainderHours}h remainder cannot be scheduled — only multiples of {DAY_HOURS}h (full days) are allocated.
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (strategy === 'custom_date') {
+    const selectedDates = Object.keys(customAllocs).filter(k => k.length === 10).sort()
+    const removeDate = (d: string) => {
+      const next = { ...customAllocs }
+      delete next[d]
+      onCustomAllocsChange?.(next)
+    }
+    return (
+      <div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
+          Specific dates
+        </div>
+        {selectedDates.length === 0 && (
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic', marginBottom: 8 }}>No dates selected — pick dates below</div>
+        )}
+        {selectedDates.map(d => (
+          <div key={d} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink)', flex: 1 }}>{d}</span>
+            <button type="button" onClick={() => removeDate(d)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', fontSize: 14, lineHeight: 1, padding: '2px 4px' }}>×</button>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+          <input type="date" className="input" min={activityStart} max={activityEnd}
+            onChange={e => {
+              const d = e.target.value
+              if (d && !customAllocs[d]) {
+                onCustomAllocsChange?.({ ...customAllocs, [d]: 1 })
+              }
+              e.target.value = ''
+            }}
+            style={{ flex: 1 }} />
+        </div>
+        {selectedDates.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--line)' }}>
+            {selectedDates.length} date{selectedDates.length !== 1 ? 's' : ''} selected
           </div>
         )}
       </div>
@@ -439,7 +504,9 @@ function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
     existing ? { ...existing } : emptyActivity(projectId, zones[0]?.id, project?.start ?? '', project?.end ?? '')
   )
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [showSpread, setShowSpread] = useState(existing?.allocationStrategy === 'custom')
+  const [showSpread, setShowSpread] = useState(
+    existing?.allocationStrategy === 'custom' || existing?.allocationStrategy === 'custom_date'
+  )
   const [pendingTypeName, setPendingTypeName] = useState<string | null>(null)
   const [customAllocs, setCustomAllocs] = useState<Record<string, number>>(() => {
     if (!activityId) return {}
@@ -449,7 +516,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
   })
 
   useEffect(() => {
-    if (form.allocationStrategy === 'custom') setShowSpread(true)
+    if (form.allocationStrategy === 'custom' || form.allocationStrategy === 'custom_date') setShowSpread(true)
   }, [form.allocationStrategy])
 
   useEffect(() => {
@@ -463,7 +530,6 @@ function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
 
   const canSave = !!(
     (form.name.trim() || form.activityTypeId) &&
-    form.siteId &&
     form.totalAllocation > 0
   )
 
@@ -474,6 +540,11 @@ function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
       if (form.allocationStrategy === 'custom') {
         const months = monthsBetween(form.start, form.end)
         const periods = months.map(m => ({ period: m, allocation: customAllocs[m] ?? 0 }))
+        await state.setActivityAllocations(existing.id, periods)
+      } else if (form.allocationStrategy === 'custom_date') {
+        const periods = Object.entries(customAllocs)
+          .filter(([k]) => k.length === 10)
+          .map(([period, allocation]) => ({ period, allocation }))
         await state.setActivityAllocations(existing.id, periods)
       }
     } else {
@@ -542,15 +613,17 @@ function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
             options={PRIORITY_OPTIONS} />
         </Field>
 
-        <Field label="Zone">
-          {zones.length === 0 ? (
-            <div style={{ padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg-sunken)', fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>
-              No zones linked to this project — add zones in the Zones tab first
+        <Field label="Zone (optional)">
+          <Select value={form.siteId ?? ''}
+            onChange={v => setForm({ ...form, siteId: v || undefined })}
+            options={[
+              { value: '', label: 'No zone (project-wide)' },
+              ...siteOptions,
+            ]} />
+          {zones.length === 0 && (
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 4 }}>
+              No zones linked — add zones in the Zones tab to scope by zone
             </div>
-          ) : (
-            <Select value={form.siteId ?? ''}
-              onChange={v => setForm({ ...form, siteId: v || undefined })}
-              options={siteOptions} />
           )}
         </Field>
 
@@ -569,7 +642,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
         <Field label={
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             Allocation strategy
-            <InfoTooltip text="Even spread: total units distributed evenly across the date range. Custom: set a specific amount per calendar month." />
+            <InfoTooltip text="Even spread: units distributed evenly across months. Custom (per month): set amount per calendar month. Custom (specific dates): pick exact dates to schedule." />
           </span>
         }>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -591,6 +664,8 @@ function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
               unit={form.unit}
               customAllocs={customAllocs}
               onCustomAllocsChange={setCustomAllocs}
+              activityStart={form.start}
+              activityEnd={form.end}
             />
             {form.allocationStrategy === 'custom' && !existing && (
               <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 8 }}>
@@ -999,8 +1074,8 @@ function AddProjectModal({ state, onClose }: {
     if (p.contractValue <= 0) { setSaveError('Contract value must be greater than $0.'); return }
     if (selectedSiteIds.length + pendingSiteNames.length === 0) { setSaveError('At least one zone is required.'); return }
     for (const act of pendingActivities) {
-      if (!act.name.trim() || !act.siteKey || act.totalAllocation <= 0) {
-        setSaveError('All activities must have a name, site, and allocation greater than 0.')
+      if (!act.name.trim() || act.totalAllocation <= 0) {
+        setSaveError('All activities must have a name and allocation greater than 0.')
         return
       }
     }
@@ -1052,6 +1127,11 @@ function AddProjectModal({ state, onClose }: {
       if (activityId && act.allocationStrategy === 'custom') {
         const months = monthsBetween(p.start, p.end)
         const periods = months.map(m => ({ period: m, allocation: act.customAllocs[m] ?? 0 }))
+        await state.setActivityAllocations(activityId, periods)
+      } else if (activityId && act.allocationStrategy === 'custom_date') {
+        const periods = Object.entries(act.customAllocs)
+          .filter(([k]) => k.length === 10)
+          .map(([period, allocation]) => ({ period, allocation }))
         await state.setActivityAllocations(activityId, periods)
       }
     }
@@ -1235,12 +1315,12 @@ function AddProjectModal({ state, onClose }: {
                 </Field>
                 {(() => {
                   const siteOpts = [
-                    { value: '', label: 'Select zone…' },
+                    { value: '', label: 'No zone (project-wide)' },
                     ...selectedSiteIds.map(id => ({ value: id, label: state.sites.find(s => s.id === id)?.name ?? id })),
                     ...pendingSiteNames.map((name, i) => ({ value: `pending:${i}`, label: `${name} (new)` })),
                   ]
                   return (
-                    <Field label="Site">
+                    <Field label="Zone (optional)">
                       <Select value={a.siteKey ?? ''}
                         onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, siteKey: v } : x))}
                         options={siteOpts} />
@@ -1285,6 +1365,8 @@ function AddProjectModal({ state, onClose }: {
                       unit={a.unit}
                       customAllocs={a.customAllocs ?? {}}
                       onCustomAllocsChange={allocs => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, customAllocs: allocs } : x))}
+                      activityStart={p.start}
+                      activityEnd={p.end}
                     />
                   </div>
                 )}
@@ -1312,7 +1394,8 @@ function AddProjectModal({ state, onClose }: {
                 ) : null}
                 <Field label="Required skills">
                   <SkillsDropdown selected={a.skills ?? []} allSkills={state.skills}
-                    onChange={skills => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, skills } : x))} />
+                    onChange={skills => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, skills } : x))}
+                    onAddSkill={state.addSkill} />
                 </Field>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <Field label="Charge-out rate ($)">
@@ -1362,7 +1445,7 @@ function AddProjectModal({ state, onClose }: {
             </Field>
             {(() => {
               const siteOpts = [
-                { value: '', label: 'Select zone…' },
+                { value: '', label: 'No zone (project-wide)' },
                 ...selectedSiteIds.map(id => ({
                   value: id,
                   label: state.sites.find(s => s.id === id)?.name ?? id,
@@ -1373,7 +1456,7 @@ function AddProjectModal({ state, onClose }: {
                 })),
               ]
               return (
-                <Field label="Site">
+                <Field label="Zone (optional)">
                   <Select value={activityForm.siteKey ?? ''}
                     onChange={v => setActivityForm({ ...activityForm, siteKey: v })}
                     options={siteOpts} />
@@ -1418,6 +1501,8 @@ function AddProjectModal({ state, onClose }: {
                   unit={activityForm.unit}
                   customAllocs={activityForm.customAllocs}
                   onCustomAllocsChange={allocs => setActivityForm({ ...activityForm, customAllocs: allocs })}
+                  activityStart={p.start}
+                  activityEnd={p.end}
                 />
               </div>
             )}
@@ -1445,7 +1530,8 @@ function AddProjectModal({ state, onClose }: {
             ) : null}
             <Field label="Required skills">
               <SkillsDropdown selected={activityForm.skills} allSkills={state.skills}
-                onChange={skills => setActivityForm({ ...activityForm, skills })} />
+                onChange={skills => setActivityForm({ ...activityForm, skills })}
+                onAddSkill={state.addSkill} />
             </Field>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <Field label="Charge-out rate ($)">
@@ -1473,9 +1559,9 @@ function AddProjectModal({ state, onClose }: {
             </Field>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn primary" type="button"
-                disabled={!activityForm.name.trim() || !activityForm.siteKey || activityForm.totalAllocation <= 0}
+                disabled={!activityForm.name.trim() || activityForm.totalAllocation <= 0}
                 onClick={() => {
-                  if (!activityForm.name.trim() || !activityForm.siteKey || activityForm.totalAllocation <= 0) return
+                  if (!activityForm.name.trim() || activityForm.totalAllocation <= 0) return
                   setPendingActivities(prev => [...prev, { ...activityForm }])
                   setActivityForm({ name: '', activityTypeId: undefined, siteKey: '', priority: 'medium', unit: 'days', allocationStrategy: 'even', totalAllocation: 0, customAllocs: {}, crewSizeType: 'fixed', minCrew: 1, maxCrew: undefined, chargeOutRate: 0, overtimeFlag: false, overtimeRate: 1.5, skills: [], notes: undefined })
                   setShowActivityForm(false)
@@ -1488,13 +1574,12 @@ function AddProjectModal({ state, onClose }: {
         ) : (
           <>
             <button className="btn" type="button"
-              disabled={selectedSiteIds.length + pendingSiteNames.length === 0 || !p.start || !p.end}
+              disabled={!p.start || !p.end}
               onClick={() => setShowActivityForm(true)}>
               <Icon name="plus" size={14} /> Add activity
             </button>
-            {selectedClientId && (selectedSiteIds.length + pendingSiteNames.length === 0
-              ? <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>Add at least one zone above before adding activities</div>
-              : (!p.start || !p.end) && <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>Set project start and end dates before adding activities</div>
+            {selectedClientId && (!p.start || !p.end) && (
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>Set project start and end dates before adding activities</div>
             )}
           </>
         )}

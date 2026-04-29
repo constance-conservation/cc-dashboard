@@ -29,6 +29,13 @@ function calendarMonthsSpanned(actStart: Date, actEnd: Date): number {
     + (actEnd.getMonth() - actStart.getMonth()) + 1
 }
 
+// Returns unschedulable remainder hours when unit=hours and strategy=even.
+export function computeHoursRemainder(a: Activity): number {
+  if (a.unit !== 'hours' || a.allocationStrategy !== 'even') return 0
+  const remaining = Math.max(0, a.totalAllocation - a.unitsCompleted)
+  return remaining % DAY_HOURS
+}
+
 // Monthly visit target for a single activity in a given month.
 export function computeMonthlyTarget(
   a: Activity,
@@ -45,6 +52,10 @@ export function computeMonthlyTarget(
 
   const remaining = Math.max(0, a.totalAllocation - a.unitsCompleted)
 
+  if (a.allocationStrategy === 'custom_date') {
+    return allocations.filter(al => al.activityId === a.id && al.period.length === 10 && al.period.startsWith(rosterMonth)).length
+  }
+
   if (a.allocationStrategy === 'custom') {
     const monthAlloc = allocations.find(al => al.activityId === a.id && al.period === rosterMonth)
     if (monthAlloc) {
@@ -55,11 +66,18 @@ export function computeMonthlyTarget(
 
   const totalMonths = Math.max(1, calendarMonthsSpanned(actStart, actEnd))
   const monthIndex  = (y - actStart.getFullYear()) * 12 + (m - 1 - actStart.getMonth())
-  const base        = Math.floor(remaining / totalMonths)
-  const extras      = remaining % totalMonths
-  const raw         = base + (monthIndex < extras ? 1 : 0)
-  const perMonth    = a.unit === 'days' ? raw : Math.ceil(raw / DAY_HOURS)
-  return Math.max(0, perMonth)
+
+  if (a.unit === 'hours') {
+    // Distribute only full days (multiples of DAY_HOURS) to avoid partial-day allocations.
+    const fullDays = Math.floor(remaining / DAY_HOURS)
+    const dBase    = Math.floor(fullDays / totalMonths)
+    const dExtras  = fullDays % totalMonths
+    return dBase + (monthIndex < dExtras ? 1 : 0)
+  }
+
+  const base   = Math.floor(remaining / totalMonths)
+  const extras = remaining % totalMonths
+  return Math.max(0, base + (monthIndex < extras ? 1 : 0))
 }
 
 // Returns projects that have at least one active activity spanning the given day.
@@ -169,10 +187,15 @@ export function autoGenerate(
       // Only schedule on days within the activity's own date range.
       if (parseDate(act.start) > dayDate || parseDate(act.end) < dayDate) return
 
-      const target   = visitTargets[act.id] ?? 0
-      const current  = visitCount[act.id] ?? 0
-      const expected = Math.ceil((dayIdx + 1) / days.length * target)
-      if (current >= target || current >= expected) return
+      if (act.allocationStrategy === 'custom_date') {
+        const dateAlloc = allocations.find(al => al.activityId === act.id && al.period === dKey)
+        if (!dateAlloc || dateAlloc.allocation <= 0) return
+      } else {
+        const target   = visitTargets[act.id] ?? 0
+        const current  = visitCount[act.id] ?? 0
+        const expected = Math.ceil((dayIdx + 1) / days.length * target)
+        if (current >= target || current >= expected) return
+      }
 
       const avail = employees.filter(
         e => e.availability[wdName as keyof typeof e.availability] && !usedIds.has(e.id)
