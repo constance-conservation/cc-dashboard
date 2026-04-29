@@ -5,31 +5,10 @@ import { getClientDetailData } from '@/lib/reporting/queries'
 import { RowCard } from '@/components/reporting/RowCard'
 import { GenerateReportButton } from '@/components/reporting/GenerateReportButton'
 import { CadenceSelector } from '@/components/reporting/CadenceSelector'
+import { EditableField } from '@/components/reporting/EditableField'
+import { updateClientField } from '@/app/(dashboard)/reporting/clients/actions'
 
 export const dynamic = 'force-dynamic'
-
-const fieldLabel: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: 10,
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
-  color: 'var(--ink-3)',
-  marginBottom: 4,
-}
-
-const fieldValue: React.CSSProperties = {
-  fontSize: 13,
-  color: 'var(--ink)',
-}
-
-function Field({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div>
-      <div style={fieldLabel}>{label}</div>
-      <div style={fieldValue}>{value || '—'}</div>
-    </div>
-  )
-}
 
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -61,12 +40,38 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
             }}
           >
-            <Field label="Short name" value={client.name} />
-            <Field label="Long name" value={client.longName} />
-            <Field label="Contact" value={client.contactName} />
-            <Field label="Council/body" value={client.councilOrBody} />
-            <Field label="Email" value={client.contactEmail} />
-            <Field label="Phone" value={client.contactPhone} />
+            <EditableField
+              label="Short name"
+              value={client.name}
+              onSave={updateClientField.bind(null, client.id, 'name')}
+            />
+            <EditableField
+              label="Long name"
+              value={client.longName}
+              onSave={updateClientField.bind(null, client.id, 'long_name')}
+            />
+            <EditableField
+              label="Contact"
+              value={client.contactName}
+              onSave={updateClientField.bind(null, client.id, 'contact_name')}
+            />
+            <EditableField
+              label="Council/body"
+              value={client.councilOrBody}
+              onSave={updateClientField.bind(null, client.id, 'council_or_body')}
+            />
+            <EditableField
+              label="Email"
+              value={client.contactEmail}
+              inputType="email"
+              onSave={updateClientField.bind(null, client.id, 'contact_email')}
+            />
+            <EditableField
+              label="Phone"
+              value={client.contactPhone}
+              inputType="tel"
+              onSave={updateClientField.bind(null, client.id, 'contact_phone')}
+            />
           </div>
           <div style={{ borderTop: '1px solid var(--line)', padding: '14px 16px' }}>
             <CadenceSelector clientId={client.id} currentValue={client.reportFrequency} />

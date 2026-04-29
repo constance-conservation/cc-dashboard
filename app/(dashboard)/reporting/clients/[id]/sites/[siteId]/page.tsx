@@ -2,39 +2,47 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { Icon } from '@/components/icons/Icon'
 import { getSiteDetailData } from '@/lib/reporting/queries'
+import { createClient } from '@/lib/supabase/server'
 import { RowCard } from '@/components/reporting/RowCard'
 import { GenerateReportButton } from '@/components/reporting/GenerateReportButton'
+import { EditableField } from '@/components/reporting/EditableField'
+import { ScheduleSelector } from '@/components/reporting/ScheduleSelector'
+import { updateSiteField, type ScheduleConfig } from '@/app/(dashboard)/reporting/clients/[id]/sites/actions'
 
 export const dynamic = 'force-dynamic'
-
-const fieldLabel: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: 10,
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
-  color: 'var(--ink-3)',
-  marginBottom: 4,
-}
-
-const fieldValue: React.CSSProperties = {
-  fontSize: 13,
-  color: 'var(--ink)',
-}
-
-function Field({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div>
-      <div style={fieldLabel}>{label}</div>
-      <div style={fieldValue}>{value || '—'}</div>
-    </div>
-  )
-}
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function coerceScheduleConfig(raw: unknown): ScheduleConfig | null {
+  if (!raw || typeof raw !== 'object') return null
+  const cadence = (raw as { cadence?: unknown }).cadence
+  if (typeof cadence !== 'string') return null
+  return { cadence: cadence as ScheduleConfig['cadence'] }
+}
+
+async function loadScheduleConfigs(siteId: string, zoneIds: string[]): Promise<{
+  site: ScheduleConfig | null
+  byZone: Record<string, ScheduleConfig | null>
+}> {
+  const supabase = await createClient()
+  const ids = [siteId, ...zoneIds]
+  const res = await supabase
+    .from('sites')
+    .select('id,schedule_config')
+    .in('id', ids)
+  const byZone: Record<string, ScheduleConfig | null> = {}
+  let site: ScheduleConfig | null = null
+  for (const row of (res.data ?? []) as { id: string; schedule_config: unknown }[]) {
+    const sc = coerceScheduleConfig(row.schedule_config)
+    if (row.id === siteId) site = sc
+    else byZone[row.id] = sc
+  }
+  return { site, byZone }
 }
 
 export default async function SiteDetailPage({
@@ -47,6 +55,10 @@ export default async function SiteDetailPage({
   if (!data) notFound()
 
   const { site, clientName, clientLongName, zones } = data
+  const schedules = await loadScheduleConfigs(
+    site.id,
+    zones.map((z) => z.id),
+  )
 
   return (
     <div className="subpage">
@@ -71,10 +83,34 @@ export default async function SiteDetailPage({
               gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
             }}
           >
-            <Field label="Name" value={site.name} />
-            <Field label="Long name" value={site.longName} />
-            <Field label="Site type" value={site.siteType} />
-            <Field label="Project code" value={site.projectCode} />
+            <EditableField
+              label="Name"
+              value={site.name}
+              onSave={updateSiteField.bind(null, site.id, 'name')}
+            />
+            <EditableField
+              label="Long name"
+              value={site.longName}
+              onSave={updateSiteField.bind(null, site.id, 'long_name')}
+            />
+            <EditableField
+              label="Site type"
+              value={site.siteType}
+              onSave={updateSiteField.bind(null, site.id, 'site_type')}
+            />
+            <EditableField
+              label="Project code"
+              value={site.projectCode}
+              onSave={updateSiteField.bind(null, site.id, 'project_code')}
+            />
+          </div>
+          <div style={{ borderTop: '1px solid var(--line)', padding: '14px 16px' }}>
+            <ScheduleSelector
+              siteId={site.id}
+              current={schedules.site}
+              variant="full"
+              label="Site schedule"
+            />
           </div>
         </div>
 
@@ -100,21 +136,36 @@ export default async function SiteDetailPage({
                   title={z.name}
                   meta={z.longName || z.canonicalName || '—'}
                 >
-                  <span
+                  <div
                     style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 12,
-                      fontSize: 11,
-                      color: 'var(--ink-3)',
-                      fontFamily: 'var(--font-mono)',
-                      letterSpacing: '0.04em',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                      alignItems: 'flex-end',
                     }}
                   >
-                    <span>{z.inspectionCount} insp.</span>
-                    <span>Last: {formatDate(z.lastInspectionDate)}</span>
-                  </span>
-                  <GenerateReportButton scope="zone" id={z.id} />
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        fontSize: 11,
+                        color: 'var(--ink-3)',
+                        fontFamily: 'var(--font-mono)',
+                        letterSpacing: '0.04em',
+                      }}
+                    >
+                      <span>{z.inspectionCount} insp.</span>
+                      <span>Last: {formatDate(z.lastInspectionDate)}</span>
+                    </span>
+                    <ScheduleSelector
+                      siteId={z.id}
+                      current={schedules.byZone[z.id] ?? null}
+                      variant="compact"
+                      label="Schedule"
+                    />
+                    <GenerateReportButton scope="zone" id={z.id} />
+                  </div>
                 </RowCard>
               ))}
             </div>
