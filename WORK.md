@@ -16,19 +16,34 @@
 
 ## Current Sprint
 
+### Task 3 — Domain migration to app.constanceconservation.com.au
+**Branch:** `feat/activity-redesign`
+**Status:** In Progress
+
+**Goal:** Make `app.constanceconservation.com.au` canonical; redirect `cc-dashboard-rouge.vercel.app` → new domain.
+
+| Step | Status | Notes |
+|---|---|---|
+| 1. Codebase audit (hardcoded URLs) | ✅ Complete | No hardcoded old domain. `constanceconservation.com.au` refs are email-domain validation only. |
+| 2. Vercel env var `NEXT_PUBLIC_SITE_URL` | ✅ Complete | Updated to `https://app.constanceconservation.com.au` via Vercel REST API (env ID `ahaVWCYdhrjOarvK`). |
+| 3. `next.config.ts` host redirect | ✅ Complete | Host-based 307 redirect from `cc-dashboard-rouge.vercel.app` → new domain added. |
+| 4. Supabase auth config | ✅ Complete | `site_url` + `uri_allow_list` updated via Management API. New domain added; old domain + localhost preserved. |
+| 5. Code updates | ✅ Complete | None required (audit found nothing to change). |
+| 6. Redeploy + verify | ⏳ Pending | Branch pushed — Vercel building preview. Merge to main for production deploy. |
+
+---
+
 ### Task 2 — Fix site/activity persistence (RLS bug)
 **Branch:** `feat/activity-redesign`
-**Status:** Ready to migrate — awaiting James approval
+**Status:** Complete
 **PR:** —
 
 **Root cause (confirmed):** `project_site_links` table was created in migration 008 without any RLS policies. Supabase has RLS enabled, so INSERT returns error `42501: new row violates row-level security policy`. Sites never persist → activities appear orphaned.
 
-**Parallelisation analysis:** Single migration file — not parallelisable. Sequential: create SQL → get approval → run in Supabase SQL Editor.
-
-**Fix:** `supabase/migrations/012_rls_project_site_links.sql` — adds `anon_all_project_site_links` policy (`FOR ALL TO anon USING (true) WITH CHECK (true)`).
+**Fix:** `supabase/migrations/012_rls_project_site_links.sql` — applied via Supabase MCP. Policy `anon_all_project_site_links` (FOR ALL TO anon) confirmed live.
 
 **Acceptance criteria:**
-- [ ] James approves and runs `012_rls_project_site_links.sql` in Supabase SQL Editor
+- [x] Migration `012_rls_project_site_links.sql` applied via Supabase MCP
 - [ ] Create project with sites → sites persist (Sites tab shows them)
 - [ ] Activities linked to those sites display correctly in Activities tab
 
