@@ -496,22 +496,27 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
               onChange={v => setForm({ ...form, unit: v as WorkUnit })}
               options={UNIT_OPTIONS} />
           </Field>
-          <Field label={
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              Allocation strategy
-              <InfoTooltip text="Even spread: total units distributed evenly across the date range. Custom: set a specific amount per calendar month." />
-            </span>
-          }>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <div style={{ flex: 1 }}>
-                <Select value={form.allocationStrategy}
-                  onChange={v => setForm({ ...form, allocationStrategy: v as AllocationStrategy })}
-                  options={ALLOCATION_OPTIONS} />
-              </div>
-              <SpreadToggleButton open={showSpread} onClick={() => setShowSpread(s => !s)} />
-            </div>
+          <Field label={`Total ${form.unit}`}>
+            <NumericInput className="input" value={form.totalAllocation}
+              onChange={v => setForm({ ...form, totalAllocation: v })} min={0} />
           </Field>
         </div>
+
+        <Field label={
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            Allocation strategy
+            <InfoTooltip text="Even spread: total units distributed evenly across the date range. Custom: set a specific amount per calendar month." />
+          </span>
+        }>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ flex: 1 }}>
+              <Select value={form.allocationStrategy}
+                onChange={v => setForm({ ...form, allocationStrategy: v as AllocationStrategy })}
+                options={ALLOCATION_OPTIONS} />
+            </div>
+            <SpreadToggleButton open={showSpread} onClick={() => setShowSpread(s => !s)} />
+          </div>
+        </Field>
 
         {showSpread && (
           <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: -2, marginBottom: 4 }}>
@@ -530,11 +535,6 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
             )}
           </div>
         )}
-
-        <Field label={`Total ${form.unit}`}>
-          <NumericInput className="input" value={form.totalAllocation}
-            onChange={v => setForm({ ...form, totalAllocation: v })} min={0} />
-        </Field>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Field label={
@@ -1186,20 +1186,24 @@ function AddProjectModal({ state, onClose }: {
                       onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, unit: v as WorkUnit } : x))}
                       options={UNIT_OPTIONS} />
                   </Field>
-                  <Field label="Allocation strategy">
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <div style={{ flex: 1 }}>
-                        <Select value={a.allocationStrategy}
-                          onChange={v => {
-                            setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, allocationStrategy: v as AllocationStrategy } : x))
-                            if (v === 'custom') setShowExpandedSpread(true)
-                          }}
-                          options={ALLOCATION_OPTIONS} />
-                      </div>
-                      <SpreadToggleButton open={showExpandedSpread} onClick={() => setShowExpandedSpread(s => !s)} />
-                    </div>
+                  <Field label={`Total ${a.unit}`}>
+                    <NumericInput className="input" value={a.totalAllocation}
+                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, totalAllocation: v } : x))} min={0} />
                   </Field>
                 </div>
+                <Field label="Allocation strategy">
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      <Select value={a.allocationStrategy}
+                        onChange={v => {
+                          setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, allocationStrategy: v as AllocationStrategy } : x))
+                          if (v === 'custom') setShowExpandedSpread(true)
+                        }}
+                        options={ALLOCATION_OPTIONS} />
+                    </div>
+                    <SpreadToggleButton open={showExpandedSpread} onClick={() => setShowExpandedSpread(s => !s)} />
+                  </div>
+                </Field>
                 {showExpandedSpread && (
                   <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: -2 }}>
                     <AllocationSpreadPanel
@@ -1212,16 +1216,10 @@ function AddProjectModal({ state, onClose }: {
                     />
                   </div>
                 )}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <Field label={`Total ${a.unit}`}>
-                    <NumericInput className="input" value={a.totalAllocation}
-                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, totalAllocation: v } : x))} min={0} />
-                  </Field>
-                  <Field label="Crew size">
-                    <NumericInput className="input" value={a.minCrew}
-                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, minCrew: v } : x))} min={1} />
-                  </Field>
-                </div>
+                <Field label="Crew size">
+                  <NumericInput className="input" value={a.minCrew}
+                    onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, minCrew: v } : x))} min={1} />
+                </Field>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <Field label="Charge-out rate ($)">
                     <NumericInput className="input" value={a.chargeOutRate}
@@ -1299,20 +1297,24 @@ function AddProjectModal({ state, onClose }: {
                   onChange={v => setActivityForm({ ...activityForm, unit: v as WorkUnit })}
                   options={UNIT_OPTIONS} />
               </Field>
-              <Field label="Allocation strategy">
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <div style={{ flex: 1 }}>
-                    <Select value={activityForm.allocationStrategy}
-                      onChange={v => {
-                        setActivityForm({ ...activityForm, allocationStrategy: v as AllocationStrategy })
-                        if (v === 'custom') setShowNewActivitySpread(true)
-                      }}
-                      options={ALLOCATION_OPTIONS} />
-                  </div>
-                  <SpreadToggleButton open={showNewActivitySpread} onClick={() => setShowNewActivitySpread(s => !s)} />
-                </div>
+              <Field label={`Total ${activityForm.unit}`}>
+                <NumericInput className="input" value={activityForm.totalAllocation}
+                  onChange={v => setActivityForm({ ...activityForm, totalAllocation: v })} min={0} />
               </Field>
             </div>
+            <Field label="Allocation strategy">
+              <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ flex: 1 }}>
+                  <Select value={activityForm.allocationStrategy}
+                    onChange={v => {
+                      setActivityForm({ ...activityForm, allocationStrategy: v as AllocationStrategy })
+                      if (v === 'custom') setShowNewActivitySpread(true)
+                    }}
+                    options={ALLOCATION_OPTIONS} />
+                </div>
+                <SpreadToggleButton open={showNewActivitySpread} onClick={() => setShowNewActivitySpread(s => !s)} />
+              </div>
+            </Field>
             {showNewActivitySpread && (
               <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px', marginTop: -2, marginBottom: 4 }}>
                 <AllocationSpreadPanel
@@ -1325,16 +1327,10 @@ function AddProjectModal({ state, onClose }: {
                 />
               </div>
             )}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <Field label={`Total ${activityForm.unit}`}>
-                <NumericInput className="input" value={activityForm.totalAllocation}
-                  onChange={v => setActivityForm({ ...activityForm, totalAllocation: v })} min={0} />
-              </Field>
-              <Field label="Crew size">
-                <NumericInput className="input" value={activityForm.minCrew}
-                  onChange={v => setActivityForm({ ...activityForm, minCrew: v })} min={1} />
-              </Field>
-            </div>
+            <Field label="Crew size">
+              <NumericInput className="input" value={activityForm.minCrew}
+                onChange={v => setActivityForm({ ...activityForm, minCrew: v })} min={1} />
+            </Field>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <Field label="Charge-out rate ($)">
                 <NumericInput className="input" value={activityForm.chargeOutRate}
