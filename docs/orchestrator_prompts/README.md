@@ -32,9 +32,9 @@ the prompt body into the first message. The instance:
 The orchestrator (the main Claude Code session) reviews each PR and
 performs the merge.
 
-## Active prompts (round 5)
+## Active prompts (round 6)
 
-- `E17_session_prompt.md` — Sync + webhook (incremental only; backfill explicitly out of scope) (~2–3 days)
+- `E18_session_prompt.md` — Cutover (final M03b brief; ~5 min code + Peter's admin runbook)
 
 ## Archive (merged)
 
@@ -46,6 +46,7 @@ performs the merge.
 - `E15_session_prompt.md` — Inline CRUD across reporting views ✅ merged
 - `E15b_session_prompt.md` — Add/delete clients/sites/zones ✅ merged
 - `E16_session_prompt.md` — Generation pipeline + Vercel Cron ✅ merged
+- `E17_session_prompt.md` — Sync + webhook (incremental only) ✅ merged
 
 ## Worktree pattern (round 3+)
 

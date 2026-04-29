@@ -1,7 +1,7 @@
 # M03b — Native Integration: live status
 
 **Repo (canonical):** `constance-conservation/cc-dashboard`
-**Last updated:** 2026-04-29 evening (round 4 merged: E15b + E16. Generation pipeline live in cc-dashboard.)
+**Last updated:** 2026-04-29 evening (round 5 merged: E17. All Stream 1 ingestion code now resident in cc-dashboard; only cutover (E18) remains.)
 
 **Audit artefacts:**
 - `docs/audit/standalone_feature_inventory.md` — master feature inventory + revised plan
@@ -31,14 +31,14 @@ Replace the standalone reporting app (`constance-reporting.vercel.app`) with nat
 | **E14** | Global Sites view + sub-nav entry | ✅ Merged 2026-04-29 (`e98d42c`) |
 | **E15b** | Add/delete sites + zones + new client | ✅ Merged 2026-04-29 (`5f332a1`, PR #42) |
 | **E16** | Generation pipeline (full port + tests + Vercel Cron) | ✅ Merged 2026-04-29 (`84bdbec`, PR #43) |
-| **E17** | Sync + webhook (incremental only — backfill dropped) | ⏸ Queued — brief drafted (round 5), session prompt ready |
-| **E18** | Cutover — flip APPS card href, retire standalone | ⏸ Final brief |
+| **E17** | Sync + webhook (incremental only — backfill dropped) | ✅ Merged 2026-04-29 (`cbe6225`, PR #44) |
+| **E18** | Cutover — flip APPS card href, update SC webhook URL, retire standalone | ⏸ Final brief — round 6 |
 
 After **E12 + E14**, the entire standalone is fully *viewable* through cc-dashboard.
 After **E10b + E15 + E15b**, all CRUD is in cc-dashboard.
 After **E16**, generation runs in cc-dashboard (manual button + daily Vercel Cron).
-After **E17**, sync from the SC API runs in cc-dashboard.
-After **E18**, standalone retired.
+After **E17**, sync + webhook run in cc-dashboard (cron route gated on `CRON_SECRET`; webhook route exists but SC still points at the standalone until E18).
+After **E18**, standalone retired and SC webhook re-registered to cc-dashboard.
 
 ---
 
@@ -52,6 +52,35 @@ E16  generation pipeline + Vercel Cron     ✅ 84bdbec (PR #43 — Server Action
 Both executed in parallel `git worktree` directories. By design (executor briefs and orchestrator prompts) the two PRs share no files: E15b appends CRUD to existing page-level `actions.ts` files, E16 places its Server Actions in a new `lib/reporting/generation/actions.ts`. Zero merge conflicts.
 
 After round 4, M03b is at **fully editable + generation-capable** state. The reporting hierarchy can be created/edited/deleted, and reports can be generated on demand or on schedule from inside cc-dashboard. Forward queue: **E17** (sync + webhook), **E18** (cutover).
+
+---
+
+## Round 5 — merged 2026-04-29
+
+```
+E17  incremental sync + webhook ingestion  ✅ cbe6225 (PR #44 — sole brief; no parallel session)
+```
+
+After round 5, **the entire Stream 1 ingestion stack is resident in cc-dashboard.** Only the cutover (E18) remains before the standalone deploy can be retired.
+
+### What round 5 added
+
+**E17 — Ingestion port (incremental sync + webhook)**
+- New module `lib/reporting/ingestion/` (~3000 LOC source + ~1500 LOC tests + 5 sample SC audit JSON fixtures): SC API client, parser (Daily Work Report + Chemical Application Record templates), writer, lookups, process pipeline, scheduled sync (incremental only — backfill stripped), webhook handler.
+- New cron route `app/api/cron/sync-sc-inspections/route.ts` — bearer-auth via `CRON_SECRET`, schedule `*/15 * * * *`. Mirrors E16's auth-gate pattern.
+- New webhook route `app/api/webhooks/sc/route.ts` — uses Next.js 16's native `after()` (no `unstable_` prefix on 16.2.4) for fire-and-forget processing post-response.
+- `webhook_handler.ts` refactored from the standalone shape to a pure router (returns `{action: 'processing' | 'ignored', ...}`); the route handler invokes `processInspection` via `after()`. The standalone's `onProcessingComplete` callback mechanism dropped per brief.
+- `getDefaultOrganizationId()` resolves the org id at runtime via `SELECT id FROM organizations LIMIT 1` (cached in module scope) — replaces the standalone's `DEFAULT_ORGANIZATION_ID` env var dependency.
+- `vercel.json` gains the sync entry alongside the preserved `generate-reports` entry.
+- 153 new vitest tests on top of E16's 51 → **204 total**. CI mode skips 17 DB-dependent tests via `describe.skipIf` when env vars are absent (187 pass + 17 skipped headless).
+- No new npm deps. Uses native `fetch`, existing `@supabase/supabase-js`, `next/server`'s `after`.
+
+### Standalone-vs-cc-dashboard transition window
+
+Both apps point at the same Supabase project. As of merge:
+- Standalone's last sync: **2026-04-22**, `total_synced=724`. There is a ~7-day gap of inspections in SC that haven't been pulled.
+- The first successful cc-dashboard cron fire (after `CRON_SECRET` is added) will pull all inspections modified since 2026-04-22 in one shot. Function has `maxDuration = 300` and the standalone has handled larger batches before. Idempotent (`sc_audit_id` dedup, `sc_modified_at` change check) — no duplicate writes if the standalone is still running.
+- SC webhooks continue to flow to the standalone until E18's re-registration step.
 
 ### What round 4 added
 
@@ -80,9 +109,11 @@ After round 4, M03b is at **fully editable + generation-capable** state. The rep
 | Var | Owner | Effect if missing |
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | pre-existing | App fails to boot |
-| `SUPABASE_SERVICE_ROLE_KEY` | pre-existing (E10b) | Generation fails; admin-fallback for CRUD fails |
+| `SUPABASE_SERVICE_ROLE_KEY` | pre-existing (E10b) | Generation fails; admin-fallback for CRUD fails; ingestion fails |
 | `ANTHROPIC_API_KEY` | E16 — optional | Narratives fall back to placeholders; reports still generate |
-| `CRON_SECRET` | **E16 — NEW, must be set** | Cron route returns 500; manual generation Server Actions still work |
+| `CRON_SECRET` | **E16/E17 — NEW, must be set** | Both cron routes (generate-reports + sync-sc-inspections) return 500; manual generation Server Actions + webhook still work |
+| `SAFETY_CULTURE_API_TOKEN` | **E17 — NEW, must be set before E18** | Sync + webhook async processing fail with 401 from SC. Source from SC dashboard or wherever standalone stored it (standalone's local `.env` was missing on disk during E17 execution — only `.env.example` present). |
+| `SC_API_BASE_URL` | optional (E17) | Defaults to `https://api.safetyculture.io` |
 
 Generate `CRON_SECRET` with `openssl rand -hex 32` and add via Vercel dashboard or `vercel env add CRON_SECRET`. The Vercel platform sends it as `Authorization: Bearer <CRON_SECRET>` on every cron invocation.
 
@@ -93,8 +124,16 @@ Generate `CRON_SECRET` with `openssl rand -hex 32` and add via Vercel dashboard 
 - DOCX object key shape: `<client_uuid>/<filename>.docx`. `client_reports.docx_url` is a 1-year signed URL into this bucket.
 
 **Cron registration:**
-- `vercel.json` registers `/api/cron/generate-reports` on schedule `0 6 * * *` (daily 06:00 UTC).
-- After deploy, verify in Vercel project → Settings → Crons.
+- `vercel.json` registers two crons:
+  - `/api/cron/generate-reports` — `0 6 * * *` (daily 06:00 UTC)
+  - `/api/cron/sync-sc-inspections` — `*/15 * * * *` (every 15 min)
+- After deploy, verify both in Vercel project → Settings → Crons.
+
+**Webhook route:**
+- `POST /api/webhooks/sc` accepts SC webhook payloads. Returns 200 immediately for processable events, 200-with-ignored-reason for non-processable, 400 for non-JSON.
+- Async processing happens via Next.js 16's `after()` after the response. Failures log to `console.error`; SC re-sends on next `inspection.updated` (no in-app retry queue for v1).
+- **Webhook URL is the secret** — SC has no HMAC payload signing. Treat the URL as bearer-token-equivalent and don't share/log it.
+- SC is still pointed at the standalone's webhook URL — re-registration is part of E18.
 
 **Regression checklist:**
 
@@ -118,7 +157,18 @@ Generation (E16):
 - [ ] Same curl with no/wrong header → 401.
 - [ ] Same curl when `CRON_SECRET` is unset on the deploy → 500.
 - [ ] If `ANTHROPIC_API_KEY` unset, generation still completes; narrative sections contain placeholder bullets.
-- [ ] `npm run test` (vitest) passes 51/51 in CI.
+
+Ingestion (E17):
+- [ ] `curl -X POST -d '{"event":"inspection.completed","audit_id":"audit_test"}' https://<preview>/api/webhooks/sc` → 200 `{ok: true, action: 'processing', auditId: 'audit_test'}`. (Async processing fails because audit doesn't exist; logged but not surfaced — that's correct.)
+- [ ] `curl -X POST -d '{}' ...` → 200 `{ok: true, action: 'ignored', reason: 'missing_event_type'}`.
+- [ ] `curl -X POST -d '{"event":"inspection.created","audit_id":"x"}' ...` → 200 `{ok: true, action: 'ignored', reason: 'event_type_not_handled', event: 'inspection.created'}`.
+- [ ] `curl -X POST -d 'not json' ...` → 400 `{ok: false, error: 'invalid_json'}`.
+- [ ] `curl -H "Authorization: Bearer $CRON_SECRET" https://<preview>/api/cron/sync-sc-inspections` → 200 JSON `{ok: true, summary: {processed, skipped, failed, errors[]}}`.
+- [ ] After first cron fire, `sync_state.high_water_mark` advances and a fresh batch of `inspections` rows have `processing_status='success'`.
+- [ ] `/reporting/pipeline` (Pipeline Health) page reflects the latest sync state without errors.
+
+Tests:
+- [ ] `npm run test` (vitest) passes 204/204 (with env vars set) or 187/204 with 17 skipped (CI mode without DB env). Test counts will grow as future milestones add coverage.
 
 **Known limitations / round-4 caveats:**
 
@@ -169,6 +219,19 @@ covers what the new session needs that isn't in the live tracker
 - E16 `ANTHROPIC_API_KEY` missing → placeholder narratives, no error. Matches standalone `--skip-llm`.
 - E16 conflict-avoidance design: Server Actions placed in NEW `lib/reporting/generation/actions.ts` (not appended to page-level `actions.ts` files E15b modified). Resulted in zero file overlap with E15b at merge.
 
+### Round 5 (2026-04-29 evening)
+- E17 backfill explicitly DROPPED from scope. Standalone has been syncing since project inception; historical data already in Supabase. If a one-shot full re-backfill is ever needed, run `npm run sync:backfill` from the standalone clone at `~/Desktop/constance-reporting/`.
+- E17 webhook signature verification: SC has no HMAC payload signing. URL-as-bearer-token chosen — treat the registered webhook URL as the secret; don't log or share.
+- E17 webhook retry policy: no in-app retry queue for v1. Failed `processInspection` is logged to `console.error`; SC re-sends `inspection.updated` on the next inspection edit, providing eventual consistency.
+- E17 sync cadence: `*/15 * * * *` (every 15 min). Tunable via `vercel.json`.
+- E17 zone-scope auto-generation in cron: still OFF (E16 default carried).
+- E17 `getDefaultOrganizationId` resolves at runtime from `organizations` table (single row) and caches in module scope. Replaces standalone's `DEFAULT_ORGANIZATION_ID` env var dependency.
+- E17 webhook handler refactored from standalone shape: pure router returning `{action: 'processing' | 'ignored'}`. Route handler is responsible for `processInspection` via `after()`. Drops the `onProcessingComplete` callback mechanism.
+- E17 Next.js 16's `after()` works as the native `next/server` export on 16.2.4 (no `unstable_` prefix needed; no fallback chosen).
+- E17 sync_state observed shape: single row keyed by `sync_type='scheduled_feed'`, last_sync_at=2026-04-22, total_synced=724. cc-dashboard reads/writes the same row idempotently.
+- E17 organizations cardinality observed: 1 row (Constance Conservation, UUID `2c43e83e-...`).
+- E17 standalone `.env` was missing on disk during executor run (only `.env.example` present). `SAFETY_CULTURE_API_TOKEN` must be sourced from the SC dashboard before E17's preview testing or post-cutover use.
+
 ---
 
 ## Out-of-band tracks
@@ -189,8 +252,11 @@ covers what the new session needs that isn't in the live tracker
 
 ## Next session entry point
 
-1. Read this file + `docs/audit/standalone_feature_inventory.md`.
-2. Forward queue: **E17** (round 5 — brief and session prompt are ready at `docs/executor_briefs/E17_sync_webhook.md` and `docs/orchestrator_prompts/E17_session_prompt.md`), then **E18** (round 6, cutover).
-3. **E17 plan settled (2026-04-29):** Backfill explicitly DROPPED from scope. Standalone has been syncing since project inception so historical data is already in Supabase. E17 ports incremental sync (Vercel Cron every 15 min) + webhook (`/api/webhooks/sc/`) only. If a one-shot full re-backfill is ever needed, run the standalone's `npm run sync:backfill` from the local clone at `~/Desktop/constance-reporting/`.
-4. After E17 lands, **E18** is ~1 hour: flip the APPS card href on cc-dashboard home from `https://constance-reporting.vercel.app/` → `/reporting`, **update the registered webhook URL at Safety Culture** to point at cc-dashboard's `/api/webhooks/sc/`, retire standalone Vercel deploy, archive `FrostyFruit1/constance-reporting` repo. Optionally delete `/Users/feelgood/Desktop/CONSTANCE\ CONSERVATION/` legacy dir.
-5. Update this status doc as briefs land.
+1. Read this file + `docs/vision.md` (post-M03b direction).
+2. Forward queue: **E18** (round 6, cutover) is the only thing left in M03b. Brief and session prompt at `docs/executor_briefs/E18_cutover.md` and `docs/orchestrator_prompts/E18_session_prompt.md`.
+3. **Pre-E18 actions Peter must complete on the Vercel project:**
+   - Add `CRON_SECRET` (e.g. `openssl rand -hex 32`) — both crons require it.
+   - Add `SAFETY_CULTURE_API_TOKEN` — sync + webhook async processing requires it. Source from SC dashboard → API settings, or whichever password vault the standalone's token lives in (the standalone's local `.env` file was missing during E17 execution).
+   - Optional: do regression spot-checks per the verification surface above.
+4. **E18 itself** (~1 hour, mostly admin clicks): flip APPS card href, **re-register the SC webhook** at Safety Culture from the standalone URL → cc-dashboard's `/api/webhooks/sc/`, retire the standalone Vercel deploy, archive `FrostyFruit1/constance-reporting`. Optionally delete the legacy `~/Desktop/CONSTANCE CONSERVATION/` directory after retention period.
+5. **After E18:** M03b is done. The next phase is laid out in `docs/vision.md` sections 5–6 (post-M03b roadmap M04–M09 driven by the operator-efficiency thesis). Update this status doc as the final E18 entry; future rounds open new milestone status docs at `docs/milestones/MXX_*.md`.
