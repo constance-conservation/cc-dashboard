@@ -395,7 +395,6 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         supabase
           .from('activity_allocations')
           .select('id, activity_id, period, allocation')
-          .eq('organization_id', oid)
           .order('period'),
       ])
 
@@ -892,12 +891,10 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .from('activity_allocations')
         .delete()
         .eq('activity_id', activityId)
-        .eq('organization_id', oid)
       if (delErr) { console.error('setActivityAllocations delete:', delErr); return }
       if (periods.length === 0) return
       // Insert new rows
       const rows = periods.map(p => ({
-        organization_id: oid,
         activity_id: activityId,
         period: p.period,
         allocation: p.allocation,
