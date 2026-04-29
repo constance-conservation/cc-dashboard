@@ -1,7 +1,7 @@
 # M03b — Native Integration: live status
 
 **Repo (canonical):** `constance-conservation/cc-dashboard`
-**Last updated:** 2026-04-29 (round 2 merged: E10b + E11 + E13; round 3 briefs ready)
+**Last updated:** 2026-04-29 evening (round 3 merged: E12 + E14 + E15. M03b at fully viewable + editable.)
 
 **Audit artefacts:**
 - `docs/audit/standalone_feature_inventory.md` — master feature inventory + revised plan
@@ -26,9 +26,9 @@ Replace the standalone reporting app (`constance-reporting.vercel.app`) with nat
 | **E13** | Operations 3 pages (Staff/Chemicals/Species) + sub-nav un-grey | ✅ Merged 2026-04-29 (`5510202`) |
 | **E10b** | Report preview + edit mode + image uploads | ✅ Merged 2026-04-29 (`b2fd8f3`) |
 | **E11** | Inspections page | ✅ Merged 2026-04-29 (`94ddcf1`) |
-| **E12** | Pipeline Health page | 🟡 Brief ready (`docs/executor_briefs/E12_pipeline_health_page.md`) |
-| **E14** | Global Sites view + sub-nav entry | 🟡 Brief ready (`docs/executor_briefs/E14_global_sites_view.md`) |
-| **E15** | Inline CRUD across reporting views | 🟡 Brief ready (`docs/executor_briefs/E15_inline_crud.md`) |
+| **E15** | Inline CRUD across reporting views | ✅ Merged 2026-04-29 (`f7e03aa`) |
+| **E12** | Pipeline Health page | ✅ Merged 2026-04-29 (`14cee96`) |
+| **E14** | Global Sites view + sub-nav entry | ✅ Merged 2026-04-29 (`e98d42c`) |
 | **E15b** | Add/delete sites + zones + new client | ⏸ Deferred from E15 |
 | **E16** | Generation pipeline (full port + tests) | ⏸ Queued (~2 days) |
 | **E17** | Sync + webhook (Vercel Cron incremental) | ⏸ Queued |
@@ -41,20 +41,31 @@ After **E18**, standalone retired.
 
 ---
 
-## Round 3 in flight
+## Round 3 — merged 2026-04-29
 
 ```
-E12  /reporting/pipeline                     ½ day  worktree -e12
-E14  /reporting/sites + sub-nav entry        ½ day  worktree -e14
-E15  inline CRUD on /reporting/clients/*    full day  worktree -e15
+E15  inline CRUD on /reporting/clients/*   ✅ f7e03aa (merged first, no queries.ts conflict)
+E12  /reporting/pipeline                    ✅ 14cee96 (queries.ts append-only)
+E14  /reporting/sites + sub-nav entry       ✅ e98d42c (queries.ts conflict resolved on merge)
 ```
 
-All three use isolated git worktrees (per the round-2 lessons).
+All three executed in isolated `git worktree` directories (round-2
+lessons applied). Worktree pattern is now standard — see
+`docs/orchestrator_prompts/README.md`.
 
-Orchestrator prompts:
-- `docs/orchestrator_prompts/E12_session_prompt.md`
-- `docs/orchestrator_prompts/E14_session_prompt.md`
-- `docs/orchestrator_prompts/E15_session_prompt.md`
+After round 3, M03b is at **fully viewable + fully editable** state.
+The whole standalone is reachable through cc-dashboard. Forward queue:
+**E15b** (add/delete sites/zones), **E16** (generation pipeline + cron),
+**E17** (sync + webhook), **E18** (cutover).
+
+---
+
+## Orchestrator handoff
+
+A fresh orchestrator session can be spawned in `/Users/feelgood/Desktop/cc-dashboard/`.
+Bootstrap from `docs/handoff/orchestrator_2026-04-29.md` — that file
+covers what the new session needs that isn't in the live tracker
+(Peter's preferences, round-2 lessons, Supabase setup, etc.).
 
 ---
 
