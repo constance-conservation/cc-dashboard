@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { parseDate, computeMonthlyTarget, computeHoursRemainder, autoGenerate, weekdayIdx, weekdayName, getProjectsWithActivitiesOnDay } from './engine'
+import { parseDate, computeMonthlyTarget, computeHoursRemainder, autoGenerate, weekdayIdx, weekdayName, getProjectsWithActivitiesOnDay, haversineKm } from './engine'
+import type { AutoGenerateOptions, DailyWeather, WeatherConstraint } from './engine'
 import type { Activity, Employee, Project, ActivityAllocation } from '@/lib/types'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -377,5 +378,154 @@ describe('getProjectsWithActivitiesOnDay', () => {
     const result = getProjectsWithActivitiesOnDay([proj1, proj2], [act1, act2], day)
     expect(result).toHaveLength(1)
     expect(result[0].id).toBe('proj-1')
+  })
+})
+
+// ── haversineKm ───────────────────────────────────────────────────────────────
+
+describe('haversineKm', () => {
+  it('returns ~0 for the same point', () => {
+    expect(haversineKm(-33.8, 151.2, -33.8, 151.2)).toBeCloseTo(0, 1)
+  })
+
+  it('returns roughly correct distance between Sydney and Melbourne (~714km)', () => {
+    const dist = haversineKm(-33.87, 151.21, -37.81, 144.96)
+    expect(dist).toBeGreaterThan(700)
+    expect(dist).toBeLessThan(730)
+  })
+
+  it('returns < 50km for nearby points', () => {
+    expect(haversineKm(-33.8, 151.2, -33.85, 151.25)).toBeLessThan(10)
+  })
+})
+
+// ── autoGenerate — workload balancing ─────────────────────────────────────────
+
+describe('autoGenerate — workload balancing', () => {
+  it('spreads assignments across employees — no single employee dominates', () => {
+    const activity = makeActivity({ totalAllocation: 6 })
+    const employees = [
+      makeEmployee({ id: 'emp-1' }),
+      makeEmployee({ id: 'emp-2' }),
+      makeEmployee({ id: 'emp-3' }),
+    ]
+    const result = autoGenerate([activity], employees, '2026-04', new Set())
+    const counts: Record<string, number> = {}
+    Object.values(result).flat().forEach(a => {
+      counts[a.employeeId] = (counts[a.employeeId] ?? 0) + 1
+    })
+    const vals = Object.values(counts)
+    const max = Math.max(...vals)
+    const min = Math.min(...vals)
+    expect(max - min).toBeLessThanOrEqual(2)
+  })
+})
+
+// ── autoGenerate — weather constraints ───────────────────────────────────────
+
+describe('autoGenerate — weather constraints', () => {
+  it('skips a weather-sensitive activity on days that exceed max precipitation', () => {
+    const activity = makeActivity({ activityTypeId: 'type-1', totalAllocation: 2 })
+    const employee = makeEmployee()
+    const options: AutoGenerateOptions = {
+      projects: [{ id: 'proj-1', lat: -33.8, lng: 151.2 }],
+      activityTypes: [{ id: 'type-1', weatherConstraints: [{ metric: 'precipitation_mm', max: 5 }] }],
+      weather: {
+        'proj-1': {
+          '2026-04-07': { precipitation_mm: 20, wind_speed_kmh: 10, temp_max_c: 22, temp_min_c: 14 },
+          '2026-04-14': { precipitation_mm: 20, wind_speed_kmh: 10, temp_max_c: 22, temp_min_c: 14 },
+          // All other days: fine weather (handled by absence = no block)
+        },
+      },
+    }
+    const result = autoGenerate([activity], [employee], '2026-04', new Set(), [], options)
+    expect(result['2026-04-07']).toBeUndefined()
+    expect(result['2026-04-14']).toBeUndefined()
+  })
+
+  it('schedules normally when weather is within constraints', () => {
+    const activity = makeActivity({ activityTypeId: 'type-1', totalAllocation: 1 })
+    const employee = makeEmployee()
+    const options: AutoGenerateOptions = {
+      projects: [{ id: 'proj-1', lat: -33.8, lng: 151.2 }],
+      activityTypes: [{ id: 'type-1', weatherConstraints: [{ metric: 'precipitation_mm', max: 20 }] }],
+      weather: {
+        'proj-1': {
+          '2026-04-07': { precipitation_mm: 5, wind_speed_kmh: 10, temp_max_c: 22, temp_min_c: 14 },
+        },
+      },
+    }
+    const result = autoGenerate([activity], [employee], '2026-04', new Set(), [], options)
+    const total = Object.keys(result).length
+    expect(total).toBeGreaterThan(0)
+  })
+})
+
+// ── autoGenerate — equipment conflict ────────────────────────────────────────
+
+describe('autoGenerate — equipment conflict', () => {
+  it('blocks activity when same equipment is used at a far project the next day', () => {
+    // activity-1 uses vehicle-1 at proj-1 (Sydney). activity-2 uses vehicle-1 at proj-2 (Melbourne).
+    // Both want to schedule on consecutive days — the Melbourne activity should be blocked if
+    // equipment was just used in Sydney (dist ~714km >> 50km threshold).
+    const actSyd = makeActivity({ id: 'act-1', projectId: 'proj-1', activityTypeId: 'type-1', totalAllocation: 3 })
+    const actMel = makeActivity({ id: 'act-2', projectId: 'proj-2', activityTypeId: 'type-2', totalAllocation: 3 })
+    const employee = makeEmployee()
+    const equipmentTravelBufferDays = 1
+    const options: AutoGenerateOptions = {
+      projects: [
+        { id: 'proj-1', lat: -33.87, lng: 151.21 },  // Sydney
+        { id: 'proj-2', lat: -37.81, lng: 144.96 },  // Melbourne
+      ],
+      activityTypes: [
+        { id: 'type-1', requiredEquipmentIds: ['vehicle-1'] },
+        { id: 'type-2', requiredEquipmentIds: ['vehicle-1'] },
+      ],
+      equipmentTravelBufferDays,
+      equipmentNearbyThresholdKm: 50,
+    }
+    const result = autoGenerate([actSyd, actMel], [employee], '2026-04', new Set(), [], options)
+    // Check no two calendar-adjacent days (+/- 1 day) have conflicting far-project equipment
+    const scheduledDays = Object.keys(result).sort()
+    for (let i = 0; i < scheduledDays.length; i++) {
+      for (let j = i + 1; j < scheduledDays.length; j++) {
+        const dayA = scheduledDays[i]
+        const dayB = scheduledDays[j]
+        const dateA = parseDate(dayA)
+        const dateB = parseDate(dayB)
+        const diffDays = Math.round((dateB.getTime() - dateA.getTime()) / 86400000)
+        if (diffDays > equipmentTravelBufferDays) break
+        const projsA = new Set(result[dayA].map(a => a.projectId))
+        const projsB = new Set(result[dayB].map(a => a.projectId))
+        const conflicting = projsA.has('proj-1') && projsB.has('proj-2')
+          || projsA.has('proj-2') && projsB.has('proj-1')
+        expect(conflicting).toBe(false)
+      }
+    }
+    // Also verify that overall, both activities do get scheduled (engine isn't too aggressive)
+    const allProjects = new Set(Object.values(result).flat().map(a => a.projectId))
+    // At least one of the two activities should be scheduled
+    expect(allProjects.size).toBeGreaterThan(0)
+  })
+
+  it('allows same equipment at nearby projects on consecutive days', () => {
+    const actA = makeActivity({ id: 'act-1', projectId: 'proj-1', activityTypeId: 'type-1', totalAllocation: 2 })
+    const actB = makeActivity({ id: 'act-2', projectId: 'proj-2', activityTypeId: 'type-2', totalAllocation: 2 })
+    const employee = makeEmployee()
+    const options: AutoGenerateOptions = {
+      projects: [
+        { id: 'proj-1', lat: -33.80, lng: 151.20 },
+        { id: 'proj-2', lat: -33.82, lng: 151.22 },  // ~2.5km away — nearby
+      ],
+      activityTypes: [
+        { id: 'type-1', requiredEquipmentIds: ['vehicle-1'] },
+        { id: 'type-2', requiredEquipmentIds: ['vehicle-1'] },
+      ],
+      equipmentTravelBufferDays: 1,
+      equipmentNearbyThresholdKm: 50,
+    }
+    const result = autoGenerate([actA, actB], [employee], '2026-04', new Set(), [], options)
+    const totalAssigned = Object.values(result).flat().length
+    expect(totalAssigned).toBeGreaterThan(0)
   })
 })

@@ -10,6 +10,15 @@ export type CostEntryType = 'material' | 'equipment' | 'subcontractor' | 'other'
 export type ClientStatus = 'active' | 'prospect' | 'past' | 'archived'
 export type ClientType = 'government' | 'council' | 'corporate' | 'ngo' | 'private'
 
+export type WeatherMetric = 'precipitation_mm' | 'wind_speed_kmh' | 'temp_max_c' | 'temp_min_c'
+export type WeatherConstraint = { metric: WeatherMetric; max?: number; min?: number }
+export type DailyWeather = {
+  precipitation_mm: number
+  wind_speed_kmh: number
+  temp_max_c: number
+  temp_min_c: number
+}
+
 export type Client = {
   id: string
   name: string
@@ -54,6 +63,8 @@ export type Project = {
   contractValue: number
   projectNumber?: string
   archived?: boolean
+  lat?: number
+  lng?: number
 }
 
 // Physical location in the organisation's location library.
@@ -78,6 +89,8 @@ export type ActivityType = {
   id: string
   name: string
   description?: string
+  requiredEquipmentIds?: string[]   // Vehicle IDs required for this activity type
+  weatherConstraints?: WeatherConstraint[]
 }
 
 // A work package within a project, optionally scoped to a site.
@@ -170,6 +183,7 @@ export type CCState = {
   rosterMonth: string
   clients: Client[]
   archivedClients: Client[]
+  vehicles: Vehicle[]
 }
 
 export type Vehicle = {

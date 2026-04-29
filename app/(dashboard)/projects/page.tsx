@@ -10,7 +10,7 @@ import { Select } from '@/components/dashboard/Select'
 import { NumericInput } from '@/components/dashboard/NumericInput'
 import { InfoTooltip } from '@/components/dashboard/InfoTooltip'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
-import type { Project, Site, Activity, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus, ActivityType } from '@/lib/types'
+import type { Project, Site, Activity, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus, ActivityType, WeatherConstraint, WeatherMetric } from '@/lib/types'
 import { DAY_HOURS } from '@/lib/rostering/engine'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -791,6 +791,7 @@ function ProjectDrawer({ projectId, state, onClose }: {
   const [confirmDeleteZone, setConfirmDeleteZone] = useState<string | null>(null)
   const [editActivityId, setEditActivityId] = useState<string | null | 'new'>(null)
   const [editZoneId, setEditZoneId] = useState<string | null>(null)
+  const [showLocationPicker, setShowLocationPicker] = useState(false)
 
   const zones = projectZones(state, projectId)
   const linkedIds = new Set(zones.map(s => s.id))
@@ -808,6 +809,14 @@ function ProjectDrawer({ projectId, state, onClose }: {
 
   return (
     <>
+      {showLocationPicker && (
+        <LocationPickerModal
+          initialLat={edit.lat}
+          initialLng={edit.lng}
+          onConfirm={(lat, lng) => { setEdit({ ...edit, lat, lng }); setShowLocationPicker(false) }}
+          onClose={() => setShowLocationPicker(false)}
+        />
+      )}
       {confirmDeleteProject && (
         <ConfirmDialog
           title={`Delete "${p.name}"?`}
@@ -888,6 +897,27 @@ function ProjectDrawer({ projectId, state, onClose }: {
                   onChange={v => setEdit({ ...edit, contractValue: v })} min={0} />
               </Field>
             </div>
+            <Field label="Location">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {edit.lat != null && edit.lng != null ? (
+                  <span style={{ fontSize: 12, color: 'var(--ink-2)', fontFamily: 'var(--font-mono)' }}>
+                    {edit.lat.toFixed(5)}, {edit.lng.toFixed(5)}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Not set</span>
+                )}
+                <button type="button" className="btn" style={{ fontSize: 12, padding: '4px 10px' }}
+                  onClick={() => setShowLocationPicker(true)}>
+                  <Icon name="map" size={12} /> {edit.lat != null ? 'Edit' : 'Set location'}
+                </button>
+                {edit.lat != null && (
+                  <button type="button" className="iconbtn" style={{ color: 'var(--danger)' }}
+                    onClick={() => setEdit({ ...edit, lat: undefined, lng: undefined })}>
+                    <Icon name="close" size={12} />
+                  </button>
+                )}
+              </div>
+            </Field>
           </>
         )}
 
@@ -1044,7 +1074,9 @@ function AddProjectModal({ state, onClose }: {
   const [p, setP] = useState<Omit<Project, 'id'>>({
     name: '', client: '', start: '', end: '',
     priority: 'medium', contractValue: 0, projectNumber: undefined,
+    lat: undefined as number | undefined, lng: undefined as number | undefined,
   })
+  const [showLocationPicker, setShowLocationPicker] = useState(false)
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [clientOpen, setClientOpen] = useState(false)
   const [selectedSiteIds, setSelectedSiteIds] = useState<string[]>([])
@@ -1298,6 +1330,37 @@ function AddProjectModal({ state, onClose }: {
             onChange={v => setP({ ...p, contractValue: v })} min={0} />
         </Field>
       </div>
+
+      <Field label="Location">
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {p.lat != null && p.lng != null ? (
+            <span style={{ fontSize: 12, color: 'var(--ink-2)', fontFamily: 'var(--font-mono)' }}>
+              {p.lat.toFixed(5)}, {p.lng.toFixed(5)}
+            </span>
+          ) : (
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Not set</span>
+          )}
+          <button type="button" className="btn" style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={() => setShowLocationPicker(true)}>
+            <Icon name="map" size={12} /> {p.lat != null ? 'Edit' : 'Set location'}
+          </button>
+          {p.lat != null && (
+            <button type="button" className="iconbtn" style={{ color: 'var(--danger)' }}
+              onClick={() => setP({ ...p, lat: undefined, lng: undefined })}>
+              <Icon name="close" size={12} />
+            </button>
+          )}
+        </div>
+      </Field>
+
+      {showLocationPicker && (
+        <LocationPickerModal
+          initialLat={p.lat}
+          initialLng={p.lng}
+          onConfirm={(lat, lng) => { setP({ ...p, lat, lng }); setShowLocationPicker(false) }}
+          onClose={() => setShowLocationPicker(false)}
+        />
+      )}
 
       {/* Activities section */}
       <div style={{ borderTop: '1px solid var(--line)', paddingTop: 16, marginTop: 6 }}>
@@ -1635,6 +1698,99 @@ function AddProjectModal({ state, onClose }: {
   )
 }
 
+// ── LocationPickerModal ────────────────────────────────────────────────────────
+
+function LocationPickerModal({ initialLat, initialLng, onConfirm, onClose }: {
+  initialLat?: number
+  initialLng?: number
+  onConfirm: (lat: number, lng: number) => void
+  onClose: () => void
+}) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapRef = useRef<HTMLDivElement>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapInstance = useRef<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markerRef = useRef<any>(null)
+  const [leafletReady, setLeafletReady] = useState(typeof window !== 'undefined' && !!(window as any).L)
+  const [picked, setPicked] = useState<{ lat: number; lng: number } | undefined>(
+    initialLat != null && initialLng != null ? { lat: initialLat, lng: initialLng } : undefined
+  )
+
+  useEffect(() => {
+    if ((window as any).L) { setLeafletReady(true); return }
+    const css = document.createElement('link')
+    css.rel = 'stylesheet'
+    css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+    css.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY='
+    css.crossOrigin = ''
+    document.head.appendChild(css)
+    const s = document.createElement('script')
+    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+    s.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo='
+    s.crossOrigin = ''
+    s.onload = () => setLeafletReady(true)
+    document.head.appendChild(s)
+  }, [])
+
+  useEffect(() => {
+    if (!leafletReady || !mapRef.current || mapInstance.current) return
+    const L = (window as any).L
+    const center: [number, number] = initialLat != null && initialLng != null
+      ? [initialLat, initialLng]
+      : [-33.87, 151.21]
+    const map = L.map(mapRef.current, { zoomControl: true, attributionControl: false }).setView(center, initialLat != null ? 12 : 8)
+    mapInstance.current = map
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(map)
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, opacity: 0.7 }).addTo(map)
+
+    if (initialLat != null && initialLng != null) {
+      markerRef.current = L.marker([initialLat, initialLng]).addTo(map)
+    }
+
+    map.on('click', (e: any) => {
+      const { lat, lng } = e.latlng
+      if (markerRef.current) { markerRef.current.remove() }
+      markerRef.current = L.marker([lat, lng]).addTo(map)
+      setPicked({ lat, lng })
+    })
+  }, [leafletReady])
+
+  return (
+    <div className="drawer-backdrop" onClick={onClose} style={{ zIndex: 1100 }}>
+      <div style={{ width: 640, maxWidth: '95vw', background: 'var(--bg-card)', borderRadius: 16, overflow: 'hidden', boxShadow: '0 8px 40px rgba(0,0,0,0.35)' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--line)' }}>
+          <div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 600 }}>Set project location</div>
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>Click on the map to pin the project site</div>
+          </div>
+          <button className="iconbtn" onClick={onClose}><Icon name="close" size={16} /></button>
+        </div>
+        <div style={{ position: 'relative', height: 380 }}>
+          <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+          {!leafletReady && (
+            <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Loading map…
+            </div>
+          )}
+        </div>
+        <div style={{ padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--line)' }}>
+          <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: picked ? 'var(--ink-2)' : 'var(--ink-3)' }}>
+            {picked ? `${picked.lat.toFixed(5)}, ${picked.lng.toFixed(5)}` : 'No location selected'}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={onClose}>Cancel</button>
+            <button className="btn primary" disabled={!picked} onClick={() => picked && onConfirm(picked.lat, picked.lng)}>
+              Confirm location
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── ActivityTypesModal ─────────────────────────────────────────────────────────
 
 function ActivityTypesModal({ state, onClose }: {
@@ -1646,6 +1802,8 @@ function ActivityTypesModal({ state, onClose }: {
   const [editId, setEditId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editDesc, setEditDesc] = useState('')
+  const [editEquipment, setEditEquipment] = useState<string[]>([])
+  const [editWeather, setEditWeather] = useState<WeatherConstraint[]>([])
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   const addNew = (e: React.FormEvent) => {
@@ -1656,15 +1814,22 @@ function ActivityTypesModal({ state, onClose }: {
     setNewDesc('')
   }
 
-  const startEdit = (t: { id: string; name: string; description?: string }) => {
+  const startEdit = (t: ActivityType) => {
     setEditId(t.id)
     setEditName(t.name)
     setEditDesc(t.description ?? '')
+    setEditEquipment(t.requiredEquipmentIds ?? [])
+    setEditWeather(t.weatherConstraints ?? [])
   }
 
   const commitEdit = () => {
     if (!editId || !editName.trim()) return
-    state.updateActivityType(editId, { name: editName.trim(), description: editDesc.trim() || undefined })
+    state.updateActivityType(editId, {
+      name: editName.trim(),
+      description: editDesc.trim() || undefined,
+      requiredEquipmentIds: editEquipment,
+      weatherConstraints: editWeather,
+    })
     setEditId(null)
   }
 
@@ -1732,7 +1897,62 @@ function ActivityTypesModal({ state, onClose }: {
                         <input className="input" value={editDesc} onChange={e => setEditDesc(e.target.value)}
                           placeholder="Description…"
                           onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditId(null) }} />
-                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        {/* Equipment section */}
+                        <div style={{ marginTop: 6 }}>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 6 }}>
+                            Required equipment
+                          </div>
+                          {state.vehicles.length === 0 ? (
+                            <div style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>No vehicles registered</div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {state.vehicles.map(v => (
+                                <label key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                                  <input type="checkbox"
+                                    checked={editEquipment.includes(v.id)}
+                                    onChange={() => setEditEquipment(prev =>
+                                      prev.includes(v.id) ? prev.filter(id => id !== v.id) : [...prev, v.id]
+                                    )} />
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{v.registration}</span>
+                                  <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{v.make} {v.model}</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {/* Weather constraints section */}
+                        <div style={{ marginTop: 6 }}>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 6 }}>
+                            Weather constraints
+                          </div>
+                          {editWeather.map((wc, i) => (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                              <select className="input" style={{ flex: 1, fontSize: 12 }}
+                                value={wc.metric}
+                                onChange={e => setEditWeather(prev => prev.map((x, j) => j === i ? { ...x, metric: e.target.value as WeatherMetric } : x))}>
+                                <option value="precipitation_mm">Precipitation (mm)</option>
+                                <option value="wind_speed_kmh">Wind speed (km/h)</option>
+                                <option value="temp_max_c">Max temp (°C)</option>
+                                <option value="temp_min_c">Min temp (°C)</option>
+                              </select>
+                              <NumericInput className="input" style={{ width: 72 }} placeholder="Max"
+                                value={wc.max ?? 0}
+                                onChange={v => setEditWeather(prev => prev.map((x, j) => j === i ? { ...x, max: v || undefined } : x))} />
+                              <NumericInput className="input" style={{ width: 72 }} placeholder="Min"
+                                value={wc.min ?? 0}
+                                onChange={v => setEditWeather(prev => prev.map((x, j) => j === i ? { ...x, min: v || undefined } : x))} />
+                              <button type="button" className="iconbtn" style={{ color: 'var(--danger)' }}
+                                onClick={() => setEditWeather(prev => prev.filter((_, j) => j !== i))}>
+                                <Icon name="trash" size={12} />
+                              </button>
+                            </div>
+                          ))}
+                          <button type="button" className="btn" style={{ fontSize: 12, padding: '4px 10px' }}
+                            onClick={() => setEditWeather(prev => [...prev, { metric: 'precipitation_mm' }])}>
+                            + Add constraint
+                          </button>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 8 }}>
                           <button className="btn primary" onClick={commitEdit} style={{ fontSize: 12, padding: '5px 10px' }}>Save</button>
                           <button className="btn" onClick={() => setEditId(null)} style={{ fontSize: 12, padding: '5px 10px' }}>Cancel</button>
                         </div>
@@ -1742,6 +1962,20 @@ function ActivityTypesModal({ state, onClose }: {
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: 13, fontWeight: 500 }}>{t.name}</div>
                           {t.description && <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 1 }}>{t.description}</div>}
+                          {((t.requiredEquipmentIds?.length ?? 0) > 0 || (t.weatherConstraints?.length ?? 0) > 0) && (
+                            <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                              {(t.requiredEquipmentIds?.length ?? 0) > 0 && (
+                                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'var(--bg-card)', color: 'var(--ink-2)', border: '1px solid var(--line)' }}>
+                                  {t.requiredEquipmentIds!.length} vehicle{t.requiredEquipmentIds!.length !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                              {(t.weatherConstraints?.length ?? 0) > 0 && (
+                                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'var(--bg-card)', color: 'var(--ink-2)', border: '1px solid var(--line)' }}>
+                                  {t.weatherConstraints!.length} constraint{t.weatherConstraints!.length !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <button className="iconbtn" onClick={() => startEdit(t)} style={{ color: 'var(--ink-3)' }}>
                           <Icon name="edit" size={13} />

@@ -9,7 +9,7 @@ import { Select } from '@/components/dashboard/Select'
 import { NumericInput } from '@/components/dashboard/NumericInput'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import type { RosterAssignment, Activity, Employee, ActivityCarryover, CarryoverStatus } from '@/lib/types'
-import { DAY_KEYS, type DayKey, dateKey, weekdayIdx, weekdayName, parseDate, computeMonthlyTarget, detectUnderstaffing, autoGenerate, getProjectsWithActivitiesOnDay } from '@/lib/rostering/engine'
+import { DAY_KEYS, type DayKey, dateKey, weekdayIdx, weekdayName, parseDate, computeMonthlyTarget, detectUnderstaffing, autoGenerate, getProjectsWithActivitiesOnDay, type AutoGenerateOptions, type DailyWeather } from '@/lib/rostering/engine'
 
 function daysInMonth(ym: string) {
   const [y, m] = ym.split('-').map(Number)
@@ -546,6 +546,7 @@ export default function RosteringPage() {
   const [confirmAction, setConfirmAction]             = useState<'autogen' | 'clear' | null>(null)
   const [showCarryoverReview, setShowCarryoverReview] = useState(false)
   const [reviewEntries, setReviewEntries]             = useState<ReviewEntry[]>([])
+  const [generating, setGenerating]                   = useState(false)
 
   const n = daysInMonth(state.rosterMonth)
   const hasSat = state.employees.some(e => e.availability.sat)
@@ -576,12 +577,62 @@ export default function RosteringPage() {
 
   // ── Auto-generate helpers ──────────────────────────────────────────────────
 
-  function runAutoGenerate(approvedActivityIds: Set<string>) {
-    const generated = autoGenerate(state.activities, state.employees, state.rosterMonth, approvedActivityIds, state.allocations)
-    const newRoster = { ...state.roster }
-    Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
-    Object.assign(newRoster, generated)
-    state.setRoster(newRoster)
+  async function runAutoGenerate(approvedActivityIds: Set<string>) {
+    setGenerating(true)
+    try {
+      const [y, m] = state.rosterMonth.split('-').map(Number)
+      const monthStart = `${state.rosterMonth}-01`
+      const monthEnd   = `${state.rosterMonth}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`
+
+      const weather: Record<string, Record<string, DailyWeather>> = {}
+      const locatedProjects = state.projects.filter(p => p.lat != null && p.lng != null)
+      await Promise.all(locatedProjects.map(async p => {
+        try {
+          const url = `https://api.open-meteo.com/v1/forecast?latitude=${p.lat}&longitude=${p.lng}&daily=precipitation_sum,windspeed_10m_max,temperature_2m_max,temperature_2m_min&timezone=auto&start_date=${monthStart}&end_date=${monthEnd}`
+          const res  = await fetch(url)
+          const data = await res.json() as {
+            daily?: {
+              time: string[]
+              precipitation_sum: number[]
+              windspeed_10m_max: number[]
+              temperature_2m_max: number[]
+              temperature_2m_min: number[]
+            }
+          }
+          if (data.daily?.time) {
+            weather[p.id] = {}
+            data.daily.time.forEach((date, i) => {
+              weather[p.id][date] = {
+                precipitation_mm: data.daily!.precipitation_sum[i]    ?? 0,
+                wind_speed_kmh:   data.daily!.windspeed_10m_max[i]    ?? 0,
+                temp_max_c:       data.daily!.temperature_2m_max[i]   ?? 20,
+                temp_min_c:       data.daily!.temperature_2m_min[i]   ?? 10,
+              }
+            })
+          }
+        } catch {
+          // weather unavailable — engine skips weather constraints for this project
+        }
+      }))
+
+      const options: AutoGenerateOptions = {
+        projects:     state.projects.map(p => ({ id: p.id, lat: p.lat, lng: p.lng })),
+        activityTypes: state.activityTypes.map(t => ({
+          id:                   t.id,
+          requiredEquipmentIds: t.requiredEquipmentIds ?? [],
+          weatherConstraints:   t.weatherConstraints   ?? [],
+        })),
+        weather,
+      }
+
+      const generated = autoGenerate(state.activities, state.employees, state.rosterMonth, approvedActivityIds, state.allocations, options)
+      const newRoster = { ...state.roster }
+      Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
+      Object.assign(newRoster, generated)
+      state.setRoster(newRoster)
+    } finally {
+      setGenerating(false)
+    }
   }
 
   const handleAutoGen = () => {
@@ -694,7 +745,7 @@ export default function RosteringPage() {
 
       <div className="subpage-body">
         <div style={{ display: 'flex', gap: 10, marginBottom: 18, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn primary" onClick={handleAutoGen}><Icon name="cloud" size={14} /> Auto-generate</button>
+          <button className="btn primary" onClick={handleAutoGen} disabled={generating}><Icon name="cloud" size={14} /> {generating ? 'Generating…' : 'Auto-generate'}</button>
           <button className="btn" onClick={() => setConfirmAction('clear')}>Clear month</button>
           <button className="btn" onClick={() => setShowHelp(true)}>Rules</button>
           <button className="btn" onClick={() => setShowProjects(true)}>Projects</button>

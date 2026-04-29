@@ -16,6 +16,34 @@
 
 ## Current Sprint
 
+### Task 4 — Rostering intelligence: weather, equipment conflicts, location picker
+**Branch:** `feat/allocation-spread-panel`
+**Status:** Code complete — pending DB migrations (014, 015) and James approval
+
+**What was built:**
+- `lib/types.ts`: Added `WeatherMetric`, `WeatherConstraint`, `DailyWeather` types; added `lat?/lng?` to `Project`; added `requiredEquipmentIds?/weatherConstraints?` to `ActivityType`; added `vehicles: Vehicle[]` to `CCState`
+- `lib/rostering/engine.ts`: Imports shared types from `lib/types.ts`; already has `haversineKm`, weather gate, equipment conflict detection, workload balancing in `autoGenerate()` (all tested, 46 tests pass)
+- `lib/store/CCStateContext.tsx`: `rowToProject` maps lat/lng; `contractPatch` persists lat/lng; `rowToActivityType` maps `required_equipment_ids`/`weather_constraints`; `updateActivityType` saves new fields; vehicles loaded from Supabase
+- `app/(dashboard)/projects/page.tsx`: `ActivityTypesModal` has equipment multi-select + weather constraints editor per activity type; `ProjectDrawer` details tab + `AddProjectModal` have Leaflet map location picker (same CDN pattern as fleet page)
+- `app/(dashboard)/rostering/page.tsx`: `runAutoGenerate` now async — fetches Open-Meteo weather for each project with lat/lng, builds `AutoGenerateOptions`, passes to `autoGenerate()`
+
+**Pending DB migrations (need James approval before applying):**
+- `014_project_location.sql`: Adds `lat`, `lng` columns to `client_contracts`
+- `015_activity_type_metadata.sql`: Adds `required_equipment_ids`, `weather_constraints` JSONB columns to `activity_types`
+
+| Step | Status |
+|---|---|
+| Engine types + autoGenerate intelligence | ✅ Done (46 tests) |
+| `lib/types.ts` shared types + Project/ActivityType/CCState updates | ✅ Done |
+| `CCStateContext` mapping + vehicle loading | ✅ Done |
+| ActivityTypesModal: equipment + weather constraints UI | ✅ Done |
+| ProjectDrawer + AddProjectModal: Leaflet location picker | ✅ Done |
+| Rostering page: Open-Meteo weather fetch + AutoGenerateOptions | ✅ Done |
+| Migration 014 (project lat/lng) | ⏳ Pending approval |
+| Migration 015 (activity type metadata) | ⏳ Pending approval |
+
+---
+
 ### Task 3 — Domain migration to app.constanceconservation.com.au
 **Branch:** `feat/allocation-spread-panel`
 **Status:** Complete

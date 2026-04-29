@@ -6,6 +6,7 @@ import type {
   Employee, Task, Roster, RosterAssignment,
   EmploymentType, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus, CarryoverStatus,
   Client, ClientStatus, ClientType,
+  Vehicle, VehicleStatus, WeatherConstraint,
 } from '@/lib/types'
 import { createClient } from '@/lib/supabase/client'
 
@@ -40,6 +41,26 @@ function rowToProject(r: Record<string, unknown>): Project {
     contractValue: (r.contract_value as number) ?? 0,
     projectNumber: (r.project_number as string) || undefined,
     archived: (r.archived as boolean) ?? false,
+    lat: (r.lat as number) ?? undefined,
+    lng: (r.lng as number) ?? undefined,
+  }
+}
+
+function rowToVehicle(r: Record<string, unknown>): Vehicle {
+  return {
+    id: r.id as string,
+    registration: (r.registration as string) ?? '',
+    make: (r.make as string) ?? '',
+    model: (r.model as string) ?? '',
+    type: (r.type as string) ?? '',
+    status: ((r.status as string) ?? 'ok') as VehicleStatus,
+    odometerKm: (r.odometer_km as number) ?? 0,
+    lastServiceDate: (r.last_service_date as string) ?? null,
+    nextServiceDueKm: (r.next_service_due_km as number) ?? null,
+    gpsLat: (r.gps_lat as number) ?? null,
+    gpsLon: (r.gps_lon as number) ?? null,
+    driverName: (r.driver_name as string) ?? null,
+    active: (r.active as boolean) ?? true,
   }
 }
 
@@ -67,6 +88,8 @@ function rowToActivityType(r: Record<string, unknown>): ActivityType {
     id: r.id as string,
     name: (r.name as string) ?? '',
     description: (r.description as string) || undefined,
+    requiredEquipmentIds: Array.isArray(r.required_equipment_ids) ? (r.required_equipment_ids as string[]) : [],
+    weatherConstraints: Array.isArray(r.weather_constraints) ? (r.weather_constraints as WeatherConstraint[]) : [],
   }
 }
 
@@ -147,6 +170,8 @@ function contractPatch(p: Partial<Project>): Record<string, unknown> {
   if (p.contractValue !== undefined) row.contract_value      = p.contractValue
   if (p.projectNumber !== undefined) row.project_number      = p.projectNumber
   if (p.archived !== undefined)      row.archived            = p.archived
+  if (p.lat !== undefined)           row.lat                 = p.lat ?? null
+  if (p.lng !== undefined)           row.lng                 = p.lng ?? null
   return row
 }
 
@@ -216,7 +241,7 @@ type CCActions = {
   deleteSite:        (siteId: string) => void
   // Activity Types
   addActivityType:    (name: string, description?: string) => void
-  updateActivityType: (id: string, patch: { name?: string; description?: string }) => void
+  updateActivityType: (id: string, patch: Partial<Pick<ActivityType, 'name' | 'description' | 'requiredEquipmentIds' | 'weatherConstraints'>>) => void
   deleteActivityType: (id: string) => void
   // Activities
   addActivity:      (a: Omit<Activity, 'id'>) => Promise<string>
@@ -268,7 +293,7 @@ const EMPTY_STATE: CCState = {
   projects: [], sites: [], projectZoneLinks: [], activityTypes: [], activities: [], carryovers: [], allocations: [],
   employees: [], archivedEmployees: [], skills: [], roles: [],
   tasks: [], roster: {}, rosterMonth: new Date().toISOString().slice(0, 7),
-  clients: [], archivedClients: [],
+  clients: [], archivedClients: [], vehicles: [],
 }
 
 const StateContext = createContext<CCContext | null>(null)
@@ -337,6 +362,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         { data: rosterRows },
         { data: clientRows },
         { data: allocationRows },
+        { data: vehicleRows },
       ] = await Promise.all([
         supabase
           .from('staff')
@@ -396,6 +422,12 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           .from('activity_allocations')
           .select('id, activity_id, period, allocation')
           .order('period'),
+        supabase
+          .from('vehicles')
+          .select('*')
+          .eq('organization_id', oid)
+          .eq('active', true)
+          .order('registration'),
       ])
 
       if (staffErr)    console.error('load staff:',     staffErr)
@@ -450,6 +482,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         rosterMonth: stateRef.current.rosterMonth,
         clients:         (clientRows ?? []).filter(r => (r as Record<string, unknown>).status !== 'archived').map(r => rowToClient(r as Record<string, unknown>)),
         archivedClients: (clientRows ?? []).filter(r => (r as Record<string, unknown>).status === 'archived').map(r => rowToClient(r as Record<string, unknown>)),
+        vehicles:        (vehicleRows ?? []).map(r => rowToVehicle(r as Record<string, unknown>)),
       })
       setLoading(false)
     }
@@ -719,14 +752,16 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       }))
     }
 
-    function updateActivityType(id: string, patch: { name?: string; description?: string }) {
+    function updateActivityType(id: string, patch: Partial<Pick<ActivityType, 'name' | 'description' | 'requiredEquipmentIds' | 'weatherConstraints'>>) {
       setState(prev => ({
         ...prev,
         activityTypes: prev.activityTypes.map(t => t.id === id ? { ...t, ...patch } : t),
       }))
       const row: Record<string, unknown> = {}
-      if (patch.name !== undefined) row.name = patch.name
-      if (patch.description !== undefined) row.description = patch.description ?? null
+      if (patch.name !== undefined)                 row.name                   = patch.name
+      if (patch.description !== undefined)          row.description            = patch.description ?? null
+      if (patch.requiredEquipmentIds !== undefined) row.required_equipment_ids = patch.requiredEquipmentIds
+      if (patch.weatherConstraints !== undefined)   row.weather_constraints    = patch.weatherConstraints
       db.from('activity_types')
         .update(row)
         .eq('id', id)
