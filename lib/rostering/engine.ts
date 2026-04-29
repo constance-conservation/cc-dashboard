@@ -1,4 +1,4 @@
-import type { Activity, Employee, RosterAssignment, ActivityCarryover, ActivityAllocation } from '@/lib/types'
+import type { Activity, Employee, Project, RosterAssignment, ActivityCarryover, ActivityAllocation } from '@/lib/types'
 
 export const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 export type DayKey = typeof DAY_KEYS[number]
@@ -60,6 +60,21 @@ export function computeMonthlyTarget(
   const raw         = base + (monthIndex < extras ? 1 : 0)
   const perMonth    = a.unit === 'days' ? raw : Math.ceil(raw / DAY_HOURS)
   return Math.max(0, perMonth)
+}
+
+// Returns projects that have at least one active activity spanning the given day.
+export function getProjectsWithActivitiesOnDay(
+  projects: Project[],
+  activities: Activity[],
+  dayDate: Date,
+): Project[] {
+  const active = new Set(
+    activities
+      .filter(a => a.status === 'active' && !!a.start && !!a.end
+        && parseDate(a.start) <= dayDate && parseDate(a.end) >= dayDate)
+      .map(a => a.projectId)
+  )
+  return projects.filter(p => active.has(p.id))
 }
 
 // Detect days in a month where an activity was understaffed.

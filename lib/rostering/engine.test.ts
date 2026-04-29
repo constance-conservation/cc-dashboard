@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { parseDate, computeMonthlyTarget, autoGenerate, weekdayIdx, weekdayName } from './engine'
-import type { Activity, Employee, ActivityAllocation } from '@/lib/types'
+import { parseDate, computeMonthlyTarget, autoGenerate, weekdayIdx, weekdayName, getProjectsWithActivitiesOnDay } from './engine'
+import type { Activity, Employee, Project, ActivityAllocation } from '@/lib/types'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -26,6 +26,19 @@ function makeActivity(overrides: Partial<Activity> = {}): Activity {
     start: '2026-04-01',
     end: '2026-06-30',
     sortOrder: 0,
+    ...overrides,
+  }
+}
+
+function makeProject(overrides: Partial<Project> = {}): Project {
+  return {
+    id: 'proj-1',
+    name: 'Test Project',
+    client: '',
+    start: '2026-04-01',
+    end: '2026-06-30',
+    priority: 'medium',
+    contractValue: 0,
     ...overrides,
   }
 }
@@ -231,5 +244,66 @@ describe('autoGenerate', () => {
       const wd = new Date(2026, 3, day).getDay()
       expect(wd).toBe(1) // only Mondays
     }
+  })
+})
+
+// ── getProjectsWithActivitiesOnDay ────────────────────────────────────────────
+
+describe('getProjectsWithActivitiesOnDay', () => {
+  const day = parseDate('2026-04-15')
+
+  it('returns empty when no activities', () => {
+    expect(getProjectsWithActivitiesOnDay([makeProject()], [], day)).toEqual([])
+  })
+
+  it('returns empty when no projects', () => {
+    expect(getProjectsWithActivitiesOnDay([], [makeActivity()], day)).toEqual([])
+  })
+
+  it('includes project when it has an active activity spanning the day', () => {
+    const result = getProjectsWithActivitiesOnDay(
+      [makeProject()],
+      [makeActivity({ start: '2026-04-01', end: '2026-06-30' })],
+      day,
+    )
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('proj-1')
+  })
+
+  it('excludes project whose activity ends before the day', () => {
+    const result = getProjectsWithActivitiesOnDay(
+      [makeProject()],
+      [makeActivity({ start: '2026-04-01', end: '2026-04-14' })],
+      day,
+    )
+    expect(result).toHaveLength(0)
+  })
+
+  it('excludes project whose activity starts after the day', () => {
+    const result = getProjectsWithActivitiesOnDay(
+      [makeProject()],
+      [makeActivity({ start: '2026-04-16', end: '2026-06-30' })],
+      day,
+    )
+    expect(result).toHaveLength(0)
+  })
+
+  it('excludes completed activities', () => {
+    const result = getProjectsWithActivitiesOnDay(
+      [makeProject()],
+      [makeActivity({ status: 'complete' })],
+      day,
+    )
+    expect(result).toHaveLength(0)
+  })
+
+  it('only includes projects that have a matching activity', () => {
+    const proj1 = makeProject({ id: 'proj-1' })
+    const proj2 = makeProject({ id: 'proj-2' })
+    const act1  = makeActivity({ projectId: 'proj-1' })
+    const act2  = makeActivity({ id: 'act-2', projectId: 'proj-2', start: '2026-05-01', end: '2026-06-30' })
+    const result = getProjectsWithActivitiesOnDay([proj1, proj2], [act1, act2], day)
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('proj-1')
   })
 })

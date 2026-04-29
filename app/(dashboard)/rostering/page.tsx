@@ -9,7 +9,7 @@ import { Select } from '@/components/dashboard/Select'
 import { NumericInput } from '@/components/dashboard/NumericInput'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import type { RosterAssignment, Activity, Employee, ActivityCarryover, CarryoverStatus } from '@/lib/types'
-import { DAY_KEYS, type DayKey, dateKey, weekdayIdx, weekdayName, parseDate, computeMonthlyTarget, detectUnderstaffing, autoGenerate } from '@/lib/rostering/engine'
+import { DAY_KEYS, type DayKey, dateKey, weekdayIdx, weekdayName, parseDate, computeMonthlyTarget, detectUnderstaffing, autoGenerate, getProjectsWithActivitiesOnDay } from '@/lib/rostering/engine'
 
 function daysInMonth(ym: string) {
   const [y, m] = ym.split('-').map(Number)
@@ -187,167 +187,192 @@ function DayEditor({ day, ym, state, onClose }: {
   state: ReturnType<typeof useCCState>
   onClose: () => void
 }) {
-  const dKey        = dateKey(ym, day)
-  const wdName      = weekdayName(ym, day)
+  const [y, m]  = ym.split('-').map(Number)
+  const dKey    = dateKey(ym, day)
+  const wdName  = weekdayName(ym, day)
+  const dayDate = new Date(y, m - 1, day)
+  const isPast  = dKey < TODAY_KEY
+
+  const dateLabel = dayDate.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })
+
   const assignments = state.roster[dKey] || []
-  const date        = new Date(`${ym}-${String(day).padStart(2, '0')}`)
-  const dateLabel   = date.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })
-  const isPast      = dKey < TODAY_KEY
+  const update      = (next: RosterAssignment[]) => state.updateDay(dKey, next)
 
-  const available           = state.employees.filter(e => e.availability[wdName as keyof typeof e.availability])
-  const assignedIds         = new Set(assignments.map(a => a.employeeId))
-  const unassignedAvailable = available.filter(e => !assignedIds.has(e.id))
-  const unavailable         = state.employees.filter(e => !e.availability[wdName as keyof typeof e.availability])
+  const [search,   setSearch]   = useState('')
+  const [addingTo, setAddingTo] = useState<string | null>(null)
 
-  const activeProjects = state.projects.filter(p => {
-    const s = new Date(p.start), en = new Date(p.end)
-    return date >= s && date <= en
-  })
+  const available         = state.employees.filter(e => e.availability[wdName as keyof typeof e.availability])
+  const assignedIds       = new Set(assignments.map(a => a.employeeId))
+  const unassignedAvail   = available.filter(e => !assignedIds.has(e.id))
 
-  const update           = (next: RosterAssignment[]) => state.updateDay(dKey, next)
-  const removeAssignment = (empId: string) => update(assignments.filter(a => a.employeeId !== empId))
-  const changeProject    = (empId: string, projectId: string) =>
-    update(assignments.map(a =>
-      a.employeeId === empId ? { ...a, projectId, activityId: undefined, siteId: undefined } : a
-    ))
+  // Projects with active activities on this day, plus any already-assigned projects
+  const projectsForDay = useMemo(
+    () => getProjectsWithActivitiesOnDay(state.projects, state.activities, dayDate),
+    [state.projects, state.activities, dayDate.toISOString()]
+  )
+  const assignedProjectIds = new Set(assignments.map(a => a.projectId))
+  const extraProjects = state.projects.filter(
+    p => assignedProjectIds.has(p.id) && !projectsForDay.find(ap => ap.id === p.id)
+  )
+  const allProjects = [...projectsForDay, ...extraProjects]
+  const filtered = search.trim()
+    ? allProjects.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+    : allProjects
+
   const changeActivity = (empId: string, activityId: string) => {
     const act = activityId ? state.activities.find(a => a.id === activityId) : undefined
     update(assignments.map(a =>
       a.employeeId === empId ? { ...a, activityId: activityId || undefined, siteId: act?.siteId } : a
     ))
   }
-  const addTo = (empId: string, projectId: string) =>
+  const removeAssignment = (empId: string) => update(assignments.filter(a => a.employeeId !== empId))
+  const addStaff = (empId: string, projectId: string) => {
     update([...assignments, { employeeId: empId, projectId }])
+    setAddingTo(null)
+  }
   const toggleOvertime = (empId: string, hours: number) =>
     update(assignments.map(a => a.employeeId === empId ? { ...a, overtimeHours: hours } : a))
 
-  const subtitle = `${assignments.length} assigned · ${unassignedAvailable.length} available · ${unavailable.length} unavailable`
+  const subtitle = `${assignments.length} assigned · ${unassignedAvail.length} available`
 
   return (
     <Drawer title={dateLabel} subtitle={subtitle} onClose={onClose} saveLabel="Done" onSave={onClose}>
       {isPast && (
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 7,
-          padding: '8px 12px', background: 'var(--bg-sunken)',
-          borderRadius: 6, marginBottom: 14, fontSize: 12, color: 'var(--ink-3)',
+          display: 'flex', alignItems: 'center', gap: 7, padding: '8px 12px',
+          background: 'var(--bg-sunken)', borderRadius: 6, marginBottom: 14,
+          fontSize: 12, color: 'var(--ink-3)',
         }}>
           <Icon name="lock" size={12} /> Past day — edits are still saved
         </div>
       )}
 
-      {/* Assigned */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)', marginBottom: 10 }}>
-          Assigned ({assignments.length})
-        </div>
-        {assignments.length === 0 && (
-          <div style={{ fontSize: 13, color: 'var(--ink-3)', padding: 12, background: 'var(--bg-sunken)', borderRadius: 6 }}>
-            No one assigned to this day yet.
-          </div>
-        )}
-        {assignments.map(a => {
-          const emp     = state.employees.find(x => x.id === a.employeeId)
-          if (!emp) return null
-          const canOT   = state.activities.some(act => act.projectId === a.projectId && act.status === 'active' && act.overtimeFlag)
-          const actOpts = state.activities
-            .filter(act => act.projectId === a.projectId && act.status === 'active')
-            .map(act => ({ value: act.id, label: act.name }))
-          return (
-            <div key={a.employeeId} style={{
-              display: 'flex', gap: 10, alignItems: 'flex-start',
-              padding: 10, background: 'var(--bg-sunken)', borderRadius: 6, marginBottom: 6,
-            }}>
-              <div className="staff-avatar" style={{ width: 30, height: 30, fontSize: 10, flexShrink: 0, marginTop: 2 }}>
-                {emp.name.split(' ').map(x => x[0]).join('')}
-              </div>
-              <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  {emp.role}
-                </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'stretch' }}>
-                <Select
-                  value={a.projectId}
-                  onChange={v => changeProject(a.employeeId, v)}
-                  options={activeProjects.map(p => ({ value: p.id, label: p.name }))}
-                  style={{ fontSize: 12, width: 180 }}
-                />
-                {actOpts.length > 0 && (
-                  <Select
-                    value={a.activityId ?? ''}
-                    placeholder="No activity…"
-                    onChange={v => changeActivity(a.employeeId, v)}
-                    options={actOpts}
-                    style={{ fontSize: 11, width: 180 }}
-                  />
-                )}
-                {canOT && (
-                  <NumericInput
-                    className="input"
-                    placeholder="OT hrs"
-                    value={a.overtimeHours ?? 0}
-                    onChange={v => toggleOvertime(a.employeeId, v)}
-                    style={{ width: 180, fontSize: 12 }}
-                  />
-                )}
-              </div>
-              <button className="iconbtn" onClick={() => removeAssignment(a.employeeId)} style={{ color: 'var(--ink-3)', flexShrink: 0 }}>
-                <Icon name="close" size={14} />
-              </button>
-            </div>
-          )
-        })}
-      </div>
+      {/* Search */}
+      <input
+        className="input"
+        placeholder="Search projects…"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        style={{ width: '100%', marginBottom: 14 }}
+      />
 
-      {/* Available */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)', marginBottom: 10 }}>
-          Available ({unassignedAvailable.length})
-        </div>
-        {unassignedAvailable.map(emp => (
-          <div key={emp.id} style={{
-            display: 'flex', gap: 10, alignItems: 'center',
-            padding: 10, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 6, marginBottom: 6,
-          }}>
-            <div className="staff-avatar" style={{ width: 30, height: 30, fontSize: 10 }}>
-              {emp.name.split(' ').map(x => x[0]).join('')}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                {emp.role} · {emp.skills.slice(0, 2).join(', ')}
-              </div>
-            </div>
-            <Select
-              value=""
-              placeholder="+ Add to project…"
-              onChange={v => { if (v) addTo(emp.id, v) }}
-              options={activeProjects.map(p => ({ value: p.id, label: p.name }))}
-              style={{ fontSize: 12, maxWidth: 200 }}
-            />
-          </div>
-        ))}
-        {unassignedAvailable.length === 0 && (
-          <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>All available staff are assigned.</div>
-        )}
-      </div>
-
-      {/* Unavailable */}
-      {unavailable.length > 0 && (
-        <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-4)', marginBottom: 10 }}>
-            Unavailable ({unavailable.length}) — visibility only
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {unavailable.map(e => (
-              <span key={e.id} style={{ padding: '4px 8px', background: 'var(--bg-sunken)', borderRadius: 4, fontSize: 11, color: 'var(--ink-3)' }}>
-                {e.name}
-              </span>
-            ))}
-          </div>
+      {filtered.length === 0 && (
+        <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+          {search ? 'No projects match.' : 'No active projects on this day.'}
         </div>
       )}
+
+      {/* Project list */}
+      {filtered.map(project => {
+        const projAssignments = assignments.filter(a => a.projectId === project.id)
+        const actOpts = state.activities
+          .filter(a => a.projectId === project.id && a.status === 'active'
+            && parseDate(a.start) <= dayDate && parseDate(a.end) >= dayDate)
+          .map(a => ({ value: a.id, label: a.name }))
+        const canOT = state.activities.some(
+          a => a.projectId === project.id && a.status === 'active' && a.overtimeFlag
+        )
+        const isAdding = addingTo === project.id
+
+        return (
+          <div key={project.id} style={{
+            marginBottom: 10, border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden',
+          }}>
+            {/* Project header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '9px 12px', background: 'var(--bg-sunken)',
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{project.name}</div>
+              <button
+                className="btn"
+                style={{ fontSize: 11, padding: '3px 10px', height: 26, flexShrink: 0 }}
+                onClick={() => setAddingTo(isAdding ? null : project.id)}
+              >
+                {isAdding ? 'Cancel' : '+ Add staff'}
+              </button>
+            </div>
+
+            {/* Assigned staff */}
+            {projAssignments.map(a => {
+              const emp = state.employees.find(x => x.id === a.employeeId)
+              if (!emp) return null
+              return (
+                <div key={a.employeeId} style={{
+                  display: 'flex', gap: 8, alignItems: 'flex-start',
+                  padding: '9px 12px', background: 'var(--bg-elev)',
+                  borderTop: '1px solid var(--line)',
+                }}>
+                  <div className="staff-avatar" style={{ width: 28, height: 28, fontSize: 10, flexShrink: 0, marginTop: 1 }}>
+                    {emp.name.split(' ').map(x => x[0]).join('')}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      {emp.role}
+                    </div>
+                    {actOpts.length > 0 && (
+                      <Select
+                        value={a.activityId ?? ''}
+                        placeholder="No activity…"
+                        onChange={v => changeActivity(a.employeeId, v)}
+                        options={actOpts}
+                        style={{ fontSize: 11, marginTop: 5, width: '100%' }}
+                      />
+                    )}
+                    {canOT && (
+                      <NumericInput
+                        className="input"
+                        placeholder="OT hrs"
+                        value={a.overtimeHours ?? 0}
+                        onChange={v => toggleOvertime(a.employeeId, v)}
+                        style={{ width: '100%', fontSize: 11, marginTop: 4 }}
+                      />
+                    )}
+                  </div>
+                  <button className="iconbtn" onClick={() => removeAssignment(a.employeeId)}
+                    style={{ color: 'var(--ink-3)', flexShrink: 0, marginTop: 2 }}>
+                    <Icon name="close" size={13} />
+                  </button>
+                </div>
+              )
+            })}
+
+            {/* Staff picker */}
+            {isAdding && (
+              <div style={{ borderTop: '1px solid var(--line)' }}>
+                {unassignedAvail.length === 0 ? (
+                  <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)', background: 'var(--bg-elev)' }}>
+                    All available staff are already assigned.
+                  </div>
+                ) : (
+                  unassignedAvail.map((emp, i) => (
+                    <button
+                      key={emp.id}
+                      onClick={() => addStaff(emp.id, project.id)}
+                      style={{
+                        display: 'flex', gap: 8, alignItems: 'center', width: '100%',
+                        padding: '8px 12px', background: 'var(--bg-elev)', cursor: 'pointer',
+                        textAlign: 'left', borderTop: i > 0 ? '1px solid var(--line)' : 'none',
+                      }}
+                    >
+                      <div className="staff-avatar" style={{ width: 26, height: 26, fontSize: 9, flexShrink: 0 }}>
+                        {emp.name.split(' ').map(x => x[0]).join('')}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 500 }}>{emp.name}</div>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          {emp.role}{emp.skills.length > 0 ? ' · ' + emp.skills.slice(0, 2).join(', ') : ''}
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </Drawer>
   )
 }
@@ -679,6 +704,10 @@ export default function RosteringPage() {
             {monthName}
           </div>
           <button className="btn" onClick={nextMonth}>→</button>
+          <button className="btn" onClick={() => {
+            const t = new Date()
+            state.setRosterMonth(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`)
+          }}>Today</button>
         </div>
 
         {/* Calendar */}

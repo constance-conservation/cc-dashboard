@@ -14,8 +14,8 @@ import type { Project, Site, Activity, Priority, WorkUnit, AllocationStrategy, C
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function projectSites(state: ReturnType<typeof useCCState>, projectId: string): Site[] {
-  const ids = new Set(state.projectSiteLinks.filter(l => l.projectId === projectId).map(l => l.siteId))
+function projectZones(state: ReturnType<typeof useCCState>, projectId: string): Site[] {
+  const ids = new Set(state.projectZoneLinks.filter(l => l.projectId === projectId).map(l => l.siteId))
   return state.sites.filter(s => ids.has(s.id))
 }
 
@@ -137,9 +137,9 @@ function SkillsDropdown({ selected, allSkills, onChange, onAddSkill }: {
   )
 }
 
-// ── SiteSearchDropdown ─────────────────────────────────────────────────────────
+// ── ZoneSearchDropdown ─────────────────────────────────────────────────────────
 
-function SiteSearchDropdown({ linkedIds, allOrgSites, onLink, onCreateAndLink }: {
+function ZoneSearchDropdown({ linkedIds, allOrgSites, onLink, onCreateAndLink }: {
   linkedIds: Set<string>
   allOrgSites: Site[]
   onLink: (siteId: string) => void
@@ -168,7 +168,7 @@ function SiteSearchDropdown({ linkedIds, allOrgSites, onLink, onCreateAndLink }:
     <div ref={wrapRef} style={{ position: 'relative' }}>
       <input
         className="input"
-        placeholder={available.length === 0 ? 'All sites linked — type to add new…' : 'Search sites or add new…'}
+        placeholder={available.length === 0 ? 'All zones linked — type to add new…' : 'Search zones or add new…'}
         value={query}
         onChange={e => { setQuery(e.target.value); setOpen(true) }}
         onFocus={() => setOpen(true)}
@@ -432,11 +432,11 @@ function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
   const project = state.projects.find(x => x.id === projectId)
   const projectActivities = state.activities.filter(a => a.projectId === projectId)
   const currentIdx = activityId ? projectActivities.findIndex(a => a.id === activityId) : -1
-  const sites = projectSites(state, projectId)
-  const siteOptions = sites.map(s => ({ value: s.id, label: s.name }))
+  const zones = projectZones(state, projectId)
+  const siteOptions = zones.map(s => ({ value: s.id, label: s.name }))
 
   const [form, setForm] = useState<ActivityFormState>(() =>
-    existing ? { ...existing } : emptyActivity(projectId, sites[0]?.id, project?.start ?? '', project?.end ?? '')
+    existing ? { ...existing } : emptyActivity(projectId, zones[0]?.id, project?.start ?? '', project?.end ?? '')
   )
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [showSpread, setShowSpread] = useState(existing?.allocationStrategy === 'custom')
@@ -542,10 +542,10 @@ function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
             options={PRIORITY_OPTIONS} />
         </Field>
 
-        <Field label="Site">
-          {sites.length === 0 ? (
+        <Field label="Zone">
+          {zones.length === 0 ? (
             <div style={{ padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg-sunken)', fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>
-              No sites linked to this project — add sites in the Sites tab first
+              No zones linked to this project — add zones in the Zones tab first
             </div>
           ) : (
             <Select value={form.siteId ?? ''}
@@ -667,7 +667,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
 
 // ── ProjectDrawer ──────────────────────────────────────────────────────────────
 
-type DrawerTab = 'details' | 'sites' | 'activities'
+type DrawerTab = 'details' | 'zones' | 'activities'
 
 function ProjectDrawer({ projectId, state, onClose }: {
   projectId: string
@@ -678,12 +678,12 @@ function ProjectDrawer({ projectId, state, onClose }: {
   const [edit, setEdit] = useState<Project>({ ...p })
   const [tab, setTab] = useState<DrawerTab>('details')
   const [confirmDeleteProject, setConfirmDeleteProject] = useState(false)
-  const [confirmDeleteSite, setConfirmDeleteSite] = useState<string | null>(null)
+  const [confirmDeleteZone, setConfirmDeleteZone] = useState<string | null>(null)
   const [editActivityId, setEditActivityId] = useState<string | null | 'new'>(null)
-  const [editSiteId, setEditSiteId] = useState<string | null>(null)
+  const [editZoneId, setEditZoneId] = useState<string | null>(null)
 
-  const sites = projectSites(state, projectId)
-  const linkedIds = new Set(sites.map(s => s.id))
+  const zones = projectZones(state, projectId)
+  const linkedIds = new Set(zones.map(s => s.id))
   const activities = state.activities.filter(a => a.projectId === projectId)
 
   const saveDetails = () => { state.updateProject(p.id, { ...edit, client: p.client }); onClose() }
@@ -708,14 +708,14 @@ function ProjectDrawer({ projectId, state, onClose }: {
           onCancel={() => setConfirmDeleteProject(false)}
         />
       )}
-      {confirmDeleteSite && (
+      {confirmDeleteZone && (
         <ConfirmDialog
-          title="Remove site from project?"
-          message="This will unlink the site from this project. Activities assigned to this site will become project-wide."
-          confirmLabel="Remove site"
+          title="Remove zone from project?"
+          message="This will unlink the zone from this project. Activities assigned to this zone will become project-wide."
+          confirmLabel="Remove zone"
           danger
-          onConfirm={() => { state.unlinkSite(projectId, confirmDeleteSite); setConfirmDeleteSite(null) }}
-          onCancel={() => setConfirmDeleteSite(null)}
+          onConfirm={() => { state.unlinkSite(projectId, confirmDeleteZone); setConfirmDeleteZone(null) }}
+          onCancel={() => setConfirmDeleteZone(null)}
         />
       )}
 
@@ -732,8 +732,8 @@ function ProjectDrawer({ projectId, state, onClose }: {
         {/* Tab bar */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 18 }}>
           <button style={tabStyle('details')} onClick={() => setTab('details')}>Details</button>
-          <button style={tabStyle('sites')} onClick={() => setTab('sites')}>
-            Sites{sites.length > 0 ? ` (${sites.length})` : ''}
+          <button style={tabStyle('zones')} onClick={() => setTab('zones')}>
+            Zones{zones.length > 0 ? ` (${zones.length})` : ''}
           </button>
           <button style={tabStyle('activities')} onClick={() => setTab('activities')}>
             Activities{activities.length > 0 ? ` (${activities.length})` : ''}
@@ -781,21 +781,21 @@ function ProjectDrawer({ projectId, state, onClose }: {
           </>
         )}
 
-        {/* Sites tab */}
-        {tab === 'sites' && (
+        {/* Zones tab */}
+        {tab === 'zones' && (
           <>
-            {sites.length === 0 && (
+            {zones.length === 0 && (
               <div style={{ color: 'var(--ink-3)', fontSize: 12, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em', paddingBottom: 14 }}>
-                No sites yet
+                No zones yet
               </div>
             )}
-            {sites.map(s => (
+            {zones.map(s => (
               <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
-                {editSiteId === s.id ? (
+                {editZoneId === s.id ? (
                   <>
                     <input className="input" defaultValue={s.name} style={{ flex: 1 }}
                       onBlur={e => state.updateSite(s.id, { name: e.target.value })} />
-                    <button className="btn" onClick={() => setEditSiteId(null)}>Done</button>
+                    <button className="btn" onClick={() => setEditZoneId(null)}>Done</button>
                   </>
                 ) : (
                   <>
@@ -805,10 +805,10 @@ function ProjectDrawer({ projectId, state, onClose }: {
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)' }}>
                       {activities.filter(a => a.siteId === s.id).length} activities
                     </span>
-                    <button className="iconbtn" onClick={() => setEditSiteId(s.id)}>
+                    <button className="iconbtn" onClick={() => setEditZoneId(s.id)}>
                       <Icon name="edit" size={12} />
                     </button>
-                    <button className="iconbtn" onClick={() => setConfirmDeleteSite(s.id)}
+                    <button className="iconbtn" onClick={() => setConfirmDeleteZone(s.id)}
                       style={{ color: 'var(--danger)' }}>
                       <Icon name="trash" size={12} />
                     </button>
@@ -818,9 +818,9 @@ function ProjectDrawer({ projectId, state, onClose }: {
             ))}
             <div style={{ marginTop: 16 }}>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 6 }}>
-                Add site
+                Add zone
               </div>
-              <SiteSearchDropdown
+              <ZoneSearchDropdown
                 linkedIds={linkedIds}
                 allOrgSites={state.sites}
                 onLink={siteId => state.linkSite(projectId, siteId)}
@@ -844,10 +844,10 @@ function ProjectDrawer({ projectId, state, onClose }: {
               </div>
             )}
 
-            {/* Group activities by site, then project-wide (includes orphaned siteIds) */}
+            {/* Group activities by zone, then project-wide (includes orphaned siteIds) */}
             {(() => {
-              const linkedSiteIds = new Set(sites.map(s => s.id))
-              return [...sites, null].map(site => {
+              const linkedSiteIds = new Set(zones.map(s => s.id))
+              return [...zones, null].map(site => {
                 const group = site
                   ? activities.filter(a => a.siteId === site.id)
                   : activities.filter(a => !a.siteId || !linkedSiteIds.has(a.siteId))
@@ -856,7 +856,7 @@ function ProjectDrawer({ projectId, state, onClose }: {
                 return (
                   <div key={site?.id ?? 'project-wide'} style={{ marginBottom: 18 }}>
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid var(--line)' }}>
-                      {site ? site.name : (sites.length > 0 ? 'Project-wide' : 'Activities')}
+                      {site ? site.name : (zones.length > 0 ? 'Project-wide' : 'Activities')}
                     </div>
                     {group.map(a => (
                       <div key={a.id}
@@ -997,7 +997,7 @@ function AddProjectModal({ state, onClose }: {
     if (!p.start) { setSaveError('Start date is required.'); return }
     if (!p.end) { setSaveError('End date is required.'); return }
     if (p.contractValue <= 0) { setSaveError('Contract value must be greater than $0.'); return }
-    if (selectedSiteIds.length + pendingSiteNames.length === 0) { setSaveError('At least one site is required.'); return }
+    if (selectedSiteIds.length + pendingSiteNames.length === 0) { setSaveError('At least one zone is required.'); return }
     for (const act of pendingActivities) {
       if (!act.name.trim() || !act.siteKey || act.totalAllocation <= 0) {
         setSaveError('All activities must have a name, site, and allocation greater than 0.')
@@ -1120,7 +1120,7 @@ function AddProjectModal({ state, onClose }: {
 
       {/* Site picker — only shown when a client is selected */}
       {selectedClientId && (
-        <Field label="Sites (select existing or add new)">
+        <Field label="Zones (select existing or add new)">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {clientSites.map(s => (
               <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
@@ -1144,11 +1144,11 @@ function AddProjectModal({ state, onClose }: {
             ))}
             {clientSites.length === 0 && pendingSiteNames.length === 0 && (
               <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>
-                No sites for this client yet — add one below
+                No zones for this client yet — add one below
               </div>
             )}
             <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-              <input className="input" placeholder="Add new site name…"
+              <input className="input" placeholder="Add new zone name…"
                 value={newSiteInput} onChange={e => setNewSiteInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addPendingSite() } }}
                 style={{ flex: 1 }} />
@@ -1235,7 +1235,7 @@ function AddProjectModal({ state, onClose }: {
                 </Field>
                 {(() => {
                   const siteOpts = [
-                    { value: '', label: 'Select site…' },
+                    { value: '', label: 'Select zone…' },
                     ...selectedSiteIds.map(id => ({ value: id, label: state.sites.find(s => s.id === id)?.name ?? id })),
                     ...pendingSiteNames.map((name, i) => ({ value: `pending:${i}`, label: `${name} (new)` })),
                   ]
@@ -1362,7 +1362,7 @@ function AddProjectModal({ state, onClose }: {
             </Field>
             {(() => {
               const siteOpts = [
-                { value: '', label: 'Select site…' },
+                { value: '', label: 'Select zone…' },
                 ...selectedSiteIds.map(id => ({
                   value: id,
                   label: state.sites.find(s => s.id === id)?.name ?? id,
@@ -1493,7 +1493,7 @@ function AddProjectModal({ state, onClose }: {
               <Icon name="plus" size={14} /> Add activity
             </button>
             {selectedClientId && (selectedSiteIds.length + pendingSiteNames.length === 0
-              ? <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>Add at least one site above before adding activities</div>
+              ? <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>Add at least one zone above before adding activities</div>
               : (!p.start || !p.end) && <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>Set project start and end dates before adding activities</div>
             )}
           </>
@@ -1704,11 +1704,11 @@ export default function ProjectsPage() {
 
         <table className="table">
           <thead><tr>
-            <th>Project</th><th>Client</th><th>Contract value</th><th>Dates</th><th>Sites</th><th>Priority</th>
+            <th>Project</th><th>Client</th><th>Contract value</th><th>Dates</th><th>Zones</th><th>Priority</th>
           </tr></thead>
           <tbody>
             {visible.map(p => {
-              const ss = projectSites(state, p.id)
+              const ss = projectZones(state, p.id)
               return (
                 <tr key={p.id} onClick={() => setSelected(p.id)} style={{ cursor: 'pointer' }}>
                   <td style={{ fontWeight: 500 }}>

@@ -66,8 +66,8 @@ export type Site = {
   clientId?: string
 }
 
-// Links an org site to a specific project contract (many-to-many).
-export type ProjectSiteLink = {
+// Links an org site (zone) to a specific project contract (many-to-many).
+export type ProjectZoneLink = {
   projectId: string
   siteId: string
   sortOrder: number
@@ -156,7 +156,7 @@ export type Roster = Record<string, RosterAssignment[]>
 export type CCState = {
   projects: Project[]
   sites: Site[]
-  projectSiteLinks: ProjectSiteLink[]
+  projectZoneLinks: ProjectZoneLink[]
   activityTypes: ActivityType[]
   activities: Activity[]
   carryovers: ActivityCarryover[]

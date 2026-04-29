@@ -299,7 +299,7 @@ function ClientDrawer({ clientId, state, onClose }: {
                 No sites yet — add one above
               </div>
             ) : clientSites.map(s => {
-              const linkedToProjects = state.projectSiteLinks.some(l => l.siteId === s.id)
+              const linkedToProjects = state.projectZoneLinks.some(l => l.siteId === s.id)
               return (
                 <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
                   <div style={{ flex: 1 }}>
@@ -331,7 +331,7 @@ function ClientDrawer({ clientId, state, onClose }: {
                   </div>
                   {linkedToProjects && (
                     <span className="pill" style={{ fontSize: 10 }}>
-                      {state.projectSiteLinks.filter(l => l.siteId === s.id).length} project{state.projectSiteLinks.filter(l => l.siteId === s.id).length !== 1 ? 's' : ''}
+                      {state.projectZoneLinks.filter(l => l.siteId === s.id).length} project{state.projectZoneLinks.filter(l => l.siteId === s.id).length !== 1 ? 's' : ''}
                     </span>
                   )}
                   <div style={{ display: 'flex', gap: 4 }}>
