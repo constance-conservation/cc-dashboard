@@ -778,47 +778,47 @@ function ProjectDrawer({ projectId, state, onClose }: {
             {(() => {
               const linkedSiteIds = new Set(sites.map(s => s.id))
               return [...sites, null].map(site => {
-              const group = site
-                ? activities.filter(a => a.siteId === site.id)
-                : activities.filter(a => !a.siteId || !linkedSiteIds.has(a.siteId))
-              if (group.length === 0) return null
+                const group = site
+                  ? activities.filter(a => a.siteId === site.id)
+                  : activities.filter(a => !a.siteId || !linkedSiteIds.has(a.siteId))
+                if (group.length === 0) return null
 
-              return (
-                <div key={site?.id ?? 'project-wide'} style={{ marginBottom: 18 }}>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid var(--line)' }}>
-                    {site ? site.name : (sites.length > 0 ? 'Project-wide' : 'Activities')}
-                  </div>
-                  {group.map(a => (
-                    <div key={a.id}
-                      onClick={() => setEditActivityId(a.id)}
-                      style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px', borderRadius: 8, cursor: 'pointer', marginBottom: 4 }}
-                      onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-sunken)'}
-                      onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'transparent'}
-                    >
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>{a.name}</div>
-                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', display: 'flex', gap: 10 }}>
-                          <span>{a.totalAllocation}{a.unit === 'hours' ? 'h' : 'd'}</span>
-                          <span>Crew: {a.crewSizeType === 'any' ? 'any' : a.crewSizeType === 'range' ? `${a.minCrew}–${a.maxCrew}` : String(a.minCrew)}</span>
-                          <span>${a.chargeOutRate}/{a.unit === 'hours' ? 'hr' : 'day'}</span>
-                          {a.unitsCompleted > 0 && <span style={{ color: 'var(--accent)' }}>{a.unitsCompleted} done</span>}
-                        </div>
-                      </div>
-                      <span className={`pill${a.priority === 'high' ? ' accent' : ''}`} style={{ fontSize: 10 }}>
-                        <span className="dot" />{a.priority}
-                      </span>
-                      <span style={{
-                        fontFamily: 'var(--font-mono)', fontSize: 10,
-                        color: a.status === 'complete' ? 'var(--accent)' : a.status === 'on_hold' ? 'var(--warn)' : 'var(--ink-3)',
-                      }}>
-                        {a.status === 'on_hold' ? 'on hold' : a.status}
-                      </span>
+                return (
+                  <div key={site?.id ?? 'project-wide'} style={{ marginBottom: 18 }}>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid var(--line)' }}>
+                      {site ? site.name : (sites.length > 0 ? 'Project-wide' : 'Activities')}
                     </div>
-                  ))}
-                </div>
-              )
-            })
-            })}
+                    {group.map(a => (
+                      <div key={a.id}
+                        onClick={() => setEditActivityId(a.id)}
+                        style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px', borderRadius: 8, cursor: 'pointer', marginBottom: 4 }}
+                        onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-sunken)'}
+                        onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'transparent'}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>{a.name}</div>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', display: 'flex', gap: 10 }}>
+                            <span>{a.totalAllocation}{a.unit === 'hours' ? 'h' : 'd'}</span>
+                            <span>Crew: {a.crewSizeType === 'any' ? 'any' : a.crewSizeType === 'range' ? `${a.minCrew}–${a.maxCrew}` : String(a.minCrew)}</span>
+                            <span>${a.chargeOutRate}/{a.unit === 'hours' ? 'hr' : 'day'}</span>
+                            {a.unitsCompleted > 0 && <span style={{ color: 'var(--accent)' }}>{a.unitsCompleted} done</span>}
+                          </div>
+                        </div>
+                        <span className={`pill${a.priority === 'high' ? ' accent' : ''}`} style={{ fontSize: 10 }}>
+                          <span className="dot" />{a.priority}
+                        </span>
+                        <span style={{
+                          fontFamily: 'var(--font-mono)', fontSize: 10,
+                          color: a.status === 'complete' ? 'var(--accent)' : a.status === 'on_hold' ? 'var(--warn)' : 'var(--ink-3)',
+                        }}>
+                          {a.status === 'on_hold' ? 'on hold' : a.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })
+            })()}
           </>
         )}
       </Drawer>
