@@ -1,7 +1,7 @@
 # M03b — Native Integration: live status
 
 **Repo (canonical):** `constance-conservation/cc-dashboard`
-**Last updated:** 2026-04-29 evening (round 6 code merged: E18 — APPS card href flipped. Awaiting Peter's admin runbook: Vercel env vars + SC webhook re-registration + standalone retirement + GitHub archival).
+**Last updated:** 2026-04-30 (round 6 admin runbook step 2 done — `SAFETY_CULTURE_API_TOKEN` set in Vercel; awaiting redeploy + verification, then SC webhook re-registration).
 
 **Audit artefacts:**
 - `docs/audit/standalone_feature_inventory.md` — master feature inventory + revised plan
@@ -96,7 +96,7 @@ The 1-line code change is the only PR in round 6. The substance of the cutover i
 | # | Step | Status |
 |---|---|---|
 | 1 | Add `CRON_SECRET` to Vercel project env (preview + production) — `openssl rand -hex 32` | ✅ Done 2026-04-29 (set via Vercel API atomic upsert; verified with `vercel env ls`; same value in Preview + Production) |
-| 2 | Add `SAFETY_CULTURE_API_TOKEN` to Vercel project env (preview + production) — sourced from SC dashboard or password vault | ⏸ Pending |
+| 2 | Add `SAFETY_CULTURE_API_TOKEN` to Vercel project env (preview + production) — sourced from SC dashboard or password vault | ✅ Done 2026-04-30 (Peter generated fresh token from SC dashboard, added to Preview + Production via Vercel UI; previous token rotated after accidental chat-paste; audit fingerprint not captured this time). |
 | 3 | Re-register SC webhook URL → `https://<cc-dashboard-canonical-domain>/api/webhooks/sc` (events: `inspection.completed`, `inspection.updated`) | ⏸ Pending |
 | 4 | Trigger one cc-dashboard sync to close the ~7-day gap; verify `summary.failed[]` is empty | ⏸ Pending |
 | 5 | Retire the standalone Vercel deploy (`cc-digital/constance-reporting`) — pause first, then delete after retention period | ⏸ Pending |
