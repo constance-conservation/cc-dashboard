@@ -330,6 +330,13 @@ input, select, textarea { font-family: inherit; font-size: inherit; color: inher
   border-radius: 8px; background: var(--bg-elev); font-size: 13px; outline: none;
 }
 .input:focus, .select:focus { border-color: var(--accent); }
+input[type="date"] { color-scheme: light; cursor: pointer; }
+[data-mode="dark"] input[type="date"] { color-scheme: dark; }
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer; border-radius: 3px; padding: 2px;
+  filter: opacity(0.5) saturate(0);
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover { filter: opacity(0.9) saturate(1); }
 .tabs { display: flex; gap: 2px; padding: 3px; background: var(--bg-sunken); border-radius: 8px; margin-bottom: 24px; width: fit-content; border: 1px solid var(--line); }
 .tab { padding: 6px 14px; border-radius: 5px; font-size: 12px; color: var(--ink-3); cursor: pointer; transition: all 0.15s; }
 .tab:hover { color: var(--ink); }

@@ -2,13 +2,22 @@ export type EmploymentType = 'full-time' | 'part-time' | 'casual' | 'contractor'
 export type Priority = 'high' | 'medium' | 'low'
 export type WorkUnit = 'days' | 'hours'
 export type VehicleStatus = 'ok' | 'warn' | 'danger'
-export type AllocationStrategy = 'even' | 'custom'
+export type AllocationStrategy = 'even' | 'custom' | 'custom_date'
 export type CrewSizeType = 'fixed' | 'range' | 'any'
 export type ActivityStatus = 'active' | 'complete' | 'on_hold'
 export type CarryoverStatus = 'pending' | 'approved' | 'skipped'
 export type CostEntryType = 'material' | 'equipment' | 'subcontractor' | 'other'
 export type ClientStatus = 'active' | 'prospect' | 'past' | 'archived'
 export type ClientType = 'government' | 'council' | 'corporate' | 'ngo' | 'private'
+
+export type WeatherMetric = 'precipitation_mm' | 'wind_speed_kmh' | 'temp_max_c' | 'temp_min_c'
+export type WeatherConstraint = { metric: WeatherMetric; max?: number; min?: number }
+export type DailyWeather = {
+  precipitation_mm: number
+  wind_speed_kmh: number
+  temp_max_c: number
+  temp_min_c: number
+}
 
 export type Client = {
   id: string
@@ -41,6 +50,7 @@ export type Employee = {
   skills: string[]
   email: string
   phone: string
+  address?: string
 }
 
 // Top-level project container. Scheduling, crew, and rates live on Activities.
@@ -54,6 +64,8 @@ export type Project = {
   contractValue: number
   projectNumber?: string
   archived?: boolean
+  lat?: number
+  lng?: number
 }
 
 // Physical location in the organisation's location library.
@@ -66,8 +78,8 @@ export type Site = {
   clientId?: string
 }
 
-// Links an org site to a specific project contract (many-to-many).
-export type ProjectSiteLink = {
+// Links an org site (zone) to a specific project contract (many-to-many).
+export type ProjectZoneLink = {
   projectId: string
   siteId: string
   sortOrder: number
@@ -78,6 +90,8 @@ export type ActivityType = {
   id: string
   name: string
   description?: string
+  requiredEquipmentIds?: string[]   // Vehicle IDs required for this activity type
+  weatherConstraints?: WeatherConstraint[]
 }
 
 // A work package within a project, optionally scoped to a site.
@@ -156,7 +170,7 @@ export type Roster = Record<string, RosterAssignment[]>
 export type CCState = {
   projects: Project[]
   sites: Site[]
-  projectSiteLinks: ProjectSiteLink[]
+  projectZoneLinks: ProjectZoneLink[]
   activityTypes: ActivityType[]
   activities: Activity[]
   carryovers: ActivityCarryover[]
@@ -170,6 +184,7 @@ export type CCState = {
   rosterMonth: string
   clients: Client[]
   archivedClients: Client[]
+  vehicles: Vehicle[]
 }
 
 export type Vehicle = {

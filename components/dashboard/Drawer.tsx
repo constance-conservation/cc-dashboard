@@ -13,11 +13,12 @@ type DrawerProps = {
   onRestore?: () => void
   saveLabel?: string
   saveDisabled?: boolean
+  hideOverlay?: boolean
 }
 
-export function Drawer({ title, subtitle, children, onClose, onSave, onDelete, onArchive, onRestore, saveLabel = 'Save', saveDisabled = false }: DrawerProps) {
+export function Drawer({ title, subtitle, children, onClose, onSave, onDelete, onArchive, onRestore, saveLabel = 'Save', saveDisabled = false, hideOverlay = false }: DrawerProps) {
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
+    <div className="drawer-backdrop" onClick={onClose} style={hideOverlay ? { background: 'transparent' } : undefined}>
       <div className="drawer" onClick={e => e.stopPropagation()}>
         <div className="drawer-head">
           <div>
@@ -43,6 +44,7 @@ export function Drawer({ title, subtitle, children, onClose, onSave, onDelete, o
               <Icon name="unarchive" size={12} /> Restore
             </button>
           )}
+          <div style={{ flex: 1 }} />
           <button className="btn" onClick={onClose}>Cancel</button>
           {onSave && <button className="btn primary" onClick={onSave} disabled={saveDisabled}>{saveLabel}</button>}
         </div>

@@ -2,10 +2,11 @@
 
 import { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react'
 import type {
-  CCState, Project, Site, ProjectSiteLink, ActivityType, Activity, ActivityAllocation, ActivityCarryover,
+  CCState, Project, Site, ProjectZoneLink, ActivityType, Activity, ActivityAllocation, ActivityCarryover,
   Employee, Task, Roster, RosterAssignment,
   EmploymentType, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus, CarryoverStatus,
   Client, ClientStatus, ClientType,
+  Vehicle, VehicleStatus, WeatherConstraint,
 } from '@/lib/types'
 import { createClient } from '@/lib/supabase/client'
 
@@ -26,6 +27,7 @@ function rowToEmployee(r: Record<string, unknown>): Employee {
     skills: Array.isArray(r.capability_tags) ? (r.capability_tags as string[]) : [],
     email: (r.email as string) ?? '',
     phone: (r.phone as string) ?? '',
+    address: (r.address as string) || undefined,
   }
 }
 
@@ -40,6 +42,26 @@ function rowToProject(r: Record<string, unknown>): Project {
     contractValue: (r.contract_value as number) ?? 0,
     projectNumber: (r.project_number as string) || undefined,
     archived: (r.archived as boolean) ?? false,
+    lat: (r.lat as number) ?? undefined,
+    lng: (r.lng as number) ?? undefined,
+  }
+}
+
+function rowToVehicle(r: Record<string, unknown>): Vehicle {
+  return {
+    id: r.id as string,
+    registration: (r.registration as string) ?? '',
+    make: (r.make as string) ?? '',
+    model: (r.model as string) ?? '',
+    type: (r.type as string) ?? '',
+    status: ((r.status as string) ?? 'ok') as VehicleStatus,
+    odometerKm: (r.odometer_km as number) ?? 0,
+    lastServiceDate: (r.last_service_date as string) ?? null,
+    nextServiceDueKm: (r.next_service_due_km as number) ?? null,
+    gpsLat: (r.gps_lat as number) ?? null,
+    gpsLon: (r.gps_lon as number) ?? null,
+    driverName: (r.driver_name as string) ?? null,
+    active: (r.active as boolean) ?? true,
   }
 }
 
@@ -54,7 +76,7 @@ function rowToSite(r: Record<string, unknown>): Site {
   }
 }
 
-function rowToProjectSiteLink(r: Record<string, unknown>): ProjectSiteLink {
+function rowToProjectZoneLink(r: Record<string, unknown>): ProjectZoneLink {
   return {
     projectId: r.project_id as string,
     siteId: r.site_id as string,
@@ -67,6 +89,8 @@ function rowToActivityType(r: Record<string, unknown>): ActivityType {
     id: r.id as string,
     name: (r.name as string) ?? '',
     description: (r.description as string) || undefined,
+    requiredEquipmentIds: Array.isArray(r.required_equipment_ids) ? (r.required_equipment_ids as string[]) : [],
+    weatherConstraints: Array.isArray(r.weather_constraints) ? (r.weather_constraints as WeatherConstraint[]) : [],
   }
 }
 
@@ -135,6 +159,7 @@ function staffPatch(e: Partial<Employee>): Record<string, unknown> {
   if (e.skills !== undefined)       row.capability_tags = e.skills
   if (e.email !== undefined)        row.email           = e.email
   if (e.phone !== undefined)        row.phone           = e.phone
+  if (e.address  !== undefined) row.address  = e.address  ?? null
   return row
 }
 
@@ -147,6 +172,8 @@ function contractPatch(p: Partial<Project>): Record<string, unknown> {
   if (p.contractValue !== undefined) row.contract_value      = p.contractValue
   if (p.projectNumber !== undefined) row.project_number      = p.projectNumber
   if (p.archived !== undefined)      row.archived            = p.archived
+  if (p.lat !== undefined)           row.lat                 = p.lat ?? null
+  if (p.lng !== undefined)           row.lng                 = p.lng ?? null
   return row
 }
 
@@ -216,7 +243,7 @@ type CCActions = {
   deleteSite:        (siteId: string) => void
   // Activity Types
   addActivityType:    (name: string, description?: string) => void
-  updateActivityType: (id: string, patch: { name?: string; description?: string }) => void
+  updateActivityType: (id: string, patch: Partial<Pick<ActivityType, 'name' | 'description' | 'requiredEquipmentIds' | 'weatherConstraints'>>) => void
   deleteActivityType: (id: string) => void
   // Activities
   addActivity:      (a: Omit<Activity, 'id'>) => Promise<string>
@@ -265,10 +292,10 @@ type CCContext = CCState & CCActions
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const EMPTY_STATE: CCState = {
-  projects: [], sites: [], projectSiteLinks: [], activityTypes: [], activities: [], carryovers: [], allocations: [],
+  projects: [], sites: [], projectZoneLinks: [], activityTypes: [], activities: [], carryovers: [], allocations: [],
   employees: [], archivedEmployees: [], skills: [], roles: [],
   tasks: [], roster: {}, rosterMonth: new Date().toISOString().slice(0, 7),
-  clients: [], archivedClients: [],
+  clients: [], archivedClients: [], vehicles: [],
 }
 
 const StateContext = createContext<CCContext | null>(null)
@@ -327,7 +354,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         { data: staffRows,            error: staffErr },
         { data: contractRows,         error: contractErr },
         { data: siteRows },
-        { data: projectSiteLinkRows },
+        { data: projectZoneLinkRows },
         { data: activityTypeRows },
         { data: activityRows },
         { data: carryoverRows },
@@ -337,6 +364,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         { data: rosterRows },
         { data: clientRows },
         { data: allocationRows },
+        { data: vehicleRows },
       ] = await Promise.all([
         supabase
           .from('staff')
@@ -353,7 +381,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           .eq('organization_id', oid)
           .order('name'),
         supabase
-          .from('project_site_links')
+          .from('project_zone_links')
           .select('project_id, site_id, sort_order')
           .eq('organization_id', oid),
         supabase
@@ -395,8 +423,13 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         supabase
           .from('activity_allocations')
           .select('id, activity_id, period, allocation')
-          .eq('organization_id', oid)
           .order('period'),
+        supabase
+          .from('vehicles')
+          .select('*')
+          .eq('organization_id', oid)
+          .eq('active', true)
+          .order('registration'),
       ])
 
       if (staffErr)    console.error('load staff:',     staffErr)
@@ -423,7 +456,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         archivedEmployees: allStaff.filter(r => r.active === false && r.deleted !== true).map(rowToEmployee),
         projects:          (contractRows         ?? []).map(r => rowToProject(r         as Record<string, unknown>)),
         sites:             (siteRows             ?? []).map(r => rowToSite(r            as Record<string, unknown>)),
-        projectSiteLinks:  (projectSiteLinkRows  ?? []).map(r => rowToProjectSiteLink(r as Record<string, unknown>)),
+        projectZoneLinks:  (projectZoneLinkRows  ?? []).map(r => rowToProjectZoneLink(r as Record<string, unknown>)),
         activityTypes:     (activityTypeRows     ?? []).map(r => rowToActivityType(r    as Record<string, unknown>)),
         activities:        (activityRows     ?? []).map(r => rowToActivity(r    as Record<string, unknown>)),
         carryovers:        (carryoverRows    ?? []).map(r => rowToCarryover(r   as Record<string, unknown>)),
@@ -451,6 +484,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         rosterMonth: stateRef.current.rosterMonth,
         clients:         (clientRows ?? []).filter(r => (r as Record<string, unknown>).status !== 'archived').map(r => rowToClient(r as Record<string, unknown>)),
         archivedClients: (clientRows ?? []).filter(r => (r as Record<string, unknown>).status === 'archived').map(r => rowToClient(r as Record<string, unknown>)),
+        vehicles:        (vehicleRows ?? []).map(r => rowToVehicle(r as Record<string, unknown>)),
       })
       setLoading(false)
     }
@@ -537,7 +571,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       setState(prev => ({
         ...prev,
         projects:         prev.projects.filter(p => p.id !== id),
-        projectSiteLinks: prev.projectSiteLinks.filter(l => l.projectId !== id),
+        projectZoneLinks: prev.projectZoneLinks.filter(l => l.projectId !== id),
         activities:       prev.activities.filter(a => a.projectId !== id),
       }))
       db.from('client_contracts')
@@ -594,11 +628,11 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       const { orgId: oid } = ref()
       const tempSiteId = 'temp-' + Date.now()
       const optimisticSite: Site = { id: tempSiteId, name, notes, active: true, sortOrder: 0, clientId }
-      const optimisticLink: ProjectSiteLink = { projectId, siteId: tempSiteId, sortOrder: 0 }
+      const optimisticLink: ProjectZoneLink = { projectId, siteId: tempSiteId, sortOrder: 0 }
       setState(prev => ({
         ...prev,
         sites: [...prev.sites, optimisticSite].sort((a, b) => a.name.localeCompare(b.name)),
-        projectSiteLinks: [...prev.projectSiteLinks, optimisticLink],
+        projectZoneLinks: [...prev.projectZoneLinks, optimisticLink],
       }))
 
       const { data: inserted, error } = await db
@@ -612,7 +646,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         setState(prev => ({
           ...prev,
           sites: prev.sites.filter(s => s.id !== tempSiteId),
-          projectSiteLinks: prev.projectSiteLinks.filter(l => l.siteId !== tempSiteId),
+          projectZoneLinks: prev.projectZoneLinks.filter(l => l.siteId !== tempSiteId),
         }))
         return null
       }
@@ -621,18 +655,18 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       setState(prev => ({
         ...prev,
         sites: prev.sites.map(s => s.id === tempSiteId ? { ...s, id: realSiteId } : s),
-        projectSiteLinks: prev.projectSiteLinks.map(l =>
+        projectZoneLinks: prev.projectZoneLinks.map(l =>
           l.siteId === tempSiteId ? { ...l, siteId: realSiteId } : l
         ),
       }))
 
-      const { error: le } = await db.from('project_site_links')
+      const { error: le } = await db.from('project_zone_links')
         .upsert({ organization_id: oid, project_id: projectId, site_id: realSiteId, sort_order: 0 }, { ignoreDuplicates: true })
       if (le) {
         console.error('createAndLinkSite (link):', le)
         setState(prev => ({
           ...prev,
-          projectSiteLinks: prev.projectSiteLinks.filter(l => l.siteId !== realSiteId || l.projectId !== projectId),
+          projectZoneLinks: prev.projectZoneLinks.filter(l => l.siteId !== realSiteId || l.projectId !== projectId),
         }))
       }
 
@@ -643,15 +677,15 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       const { orgId: oid } = ref()
       setState(prev => ({
         ...prev,
-        projectSiteLinks: [...prev.projectSiteLinks, { projectId, siteId, sortOrder: 0 }],
+        projectZoneLinks: [...prev.projectZoneLinks, { projectId, siteId, sortOrder: 0 }],
       }))
-      const { error } = await db.from('project_site_links')
+      const { error } = await db.from('project_zone_links')
         .upsert({ organization_id: oid, project_id: projectId, site_id: siteId, sort_order: 0 }, { ignoreDuplicates: true })
       if (error) {
         console.error('linkSite:', error)
         setState(prev => ({
           ...prev,
-          projectSiteLinks: prev.projectSiteLinks.filter(l => !(l.projectId === projectId && l.siteId === siteId)),
+          projectZoneLinks: prev.projectZoneLinks.filter(l => !(l.projectId === projectId && l.siteId === siteId)),
         }))
       }
     }
@@ -659,14 +693,14 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
     function unlinkSite(projectId: string, siteId: string) {
       setState(prev => ({
         ...prev,
-        projectSiteLinks: prev.projectSiteLinks.filter(
+        projectZoneLinks: prev.projectZoneLinks.filter(
           l => !(l.projectId === projectId && l.siteId === siteId)
         ),
         activities: prev.activities.map(a =>
           a.projectId === projectId && a.siteId === siteId ? { ...a, siteId: undefined } : a
         ),
       }))
-      db.from('project_site_links')
+      db.from('project_zone_links')
         .delete()
         .eq('project_id', projectId)
         .eq('site_id', siteId)
@@ -688,7 +722,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       setState(prev => ({
         ...prev,
         sites: prev.sites.filter(s => s.id !== siteId),
-        projectSiteLinks: prev.projectSiteLinks.filter(l => l.siteId !== siteId),
+        projectZoneLinks: prev.projectZoneLinks.filter(l => l.siteId !== siteId),
       }))
       db.from('sites')
         .delete()
@@ -720,14 +754,16 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       }))
     }
 
-    function updateActivityType(id: string, patch: { name?: string; description?: string }) {
+    function updateActivityType(id: string, patch: Partial<Pick<ActivityType, 'name' | 'description' | 'requiredEquipmentIds' | 'weatherConstraints'>>) {
       setState(prev => ({
         ...prev,
         activityTypes: prev.activityTypes.map(t => t.id === id ? { ...t, ...patch } : t),
       }))
       const row: Record<string, unknown> = {}
-      if (patch.name !== undefined) row.name = patch.name
-      if (patch.description !== undefined) row.description = patch.description ?? null
+      if (patch.name !== undefined)                 row.name                   = patch.name
+      if (patch.description !== undefined)          row.description            = patch.description ?? null
+      if (patch.requiredEquipmentIds !== undefined) row.required_equipment_ids = patch.requiredEquipmentIds
+      if (patch.weatherConstraints !== undefined)   row.weather_constraints    = patch.weatherConstraints
       db.from('activity_types')
         .update(row)
         .eq('id', id)
@@ -892,12 +928,10 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         .from('activity_allocations')
         .delete()
         .eq('activity_id', activityId)
-        .eq('organization_id', oid)
       if (delErr) { console.error('setActivityAllocations delete:', delErr); return }
       if (periods.length === 0) return
       // Insert new rows
       const rows = periods.map(p => ({
-        organization_id: oid,
         activity_id: activityId,
         period: p.period,
         allocation: p.allocation,
@@ -955,6 +989,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           capability_tags: e.skills,
           email:           e.email,
           phone:           e.phone,
+          address:         e.address  ?? null,
           active:          true,
         })
         .select('id')
@@ -1329,7 +1364,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         clients:          prev.clients.filter(c => c.id !== id),
         archivedClients:  prev.archivedClients.filter(c => c.id !== id),
         projects:         prev.projects.filter(p => p.client !== clientName),
-        projectSiteLinks: prev.projectSiteLinks.filter(l => !linkedProjectIds.includes(l.projectId)),
+        projectZoneLinks: prev.projectZoneLinks.filter(l => !linkedProjectIds.includes(l.projectId)),
         activities:       prev.activities.filter(a => !linkedProjectIds.includes(a.projectId)),
         sites:            prev.sites.filter(s => s.clientId !== id),
       }))
@@ -1345,10 +1380,10 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
           .in('project_id', linkedProjectIds)
         if (actErr) console.error('deleteClient (activities):', actErr)
         const { error: pslErr } = await db
-          .from('project_site_links')
+          .from('project_zone_links')
           .delete()
           .in('project_id', linkedProjectIds)
-        if (pslErr) console.error('deleteClient (project_site_links):', pslErr)
+        if (pslErr) console.error('deleteClient (project_zone_links):', pslErr)
         const { error: ccErr } = await db
           .from('client_contracts')
           .delete()

@@ -137,7 +137,7 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
   const isArchived = !state.employees.find(e => e.id === employeeId)
   const [edit, setEdit] = useState<Employee>(emp)
   const [confirm, setConfirm] = useState<'delete' | 'archive' | null>(null)
-  const save = () => { state.updateEmployee(emp.id, edit); onClose() }
+  const save = () => { if (!edit.address?.trim()) return; state.updateEmployee(emp.id, edit); onClose() }
   const del = () => setConfirm('delete')
   const archive = () => setConfirm('archive')
   const restore = () => { state.unarchiveEmployee(emp.id); onClose() }
@@ -193,6 +193,11 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
         <Field label="Email"><input className="input" value={edit.email} onChange={e => setEdit({ ...edit, email: e.target.value })} /></Field>
         <Field label="Phone"><input className="input" value={edit.phone} onChange={e => setEdit({ ...edit, phone: e.target.value })} /></Field>
       </div>
+      <Field label="Home address">
+        <input className="input" placeholder="e.g. 12 Smith St, Camden NSW 2570"
+          value={edit.address ?? ''}
+          onChange={e => setEdit({ ...edit, address: e.target.value || undefined })} />
+      </Field>
       <Field label="Weekly availability">
         <div style={{ display: 'flex', gap: 4 }}>
           {days.map(d => (
@@ -213,8 +218,8 @@ function EmployeeDrawer({ employeeId, state, onClose }: { employeeId: string; st
 }
 
 function AddEmployeeModal({ state, onClose }: { state: ReturnType<typeof useCCState>; onClose: () => void }) {
-  const [e, setE] = useState<Omit<Employee, 'id'>>({ name: '', role: state.roles[0] || 'Field Crew', type: 'full-time', payRate: 40, email: '', phone: '', availability: { mon: true, tue: true, wed: true, thu: true, fri: true, sat: false }, skills: [] })
-  const save = () => { if (!e.name.trim()) return; state.addEmployee(e); onClose() }
+  const [e, setE] = useState<Omit<Employee, 'id'>>({ name: '', role: state.roles[0] || 'Field Crew', type: 'full-time', payRate: 40, email: '', phone: '', availability: { mon: true, tue: true, wed: true, thu: true, fri: true, sat: false }, skills: [], address: undefined })
+  const save = () => { if (!e.name.trim() || !e.address?.trim()) return; state.addEmployee(e); onClose() }
   const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
   return (
     <Drawer title="New employee" subtitle="Add to team roster" onClose={onClose} onSave={save} saveLabel="Create">
@@ -231,6 +236,11 @@ function AddEmployeeModal({ state, onClose }: { state: ReturnType<typeof useCCSt
         <Field label="Email"><input className="input" type="email" placeholder="email@example.com" value={e.email} onChange={ev => setE({ ...e, email: ev.target.value })} /></Field>
         <Field label="Phone"><input className="input" type="tel" placeholder="04xx xxx xxx" value={e.phone} onChange={ev => setE({ ...e, phone: ev.target.value })} /></Field>
       </div>
+      <Field label="Home address">
+        <input className="input" placeholder="e.g. 12 Smith St, Camden NSW 2570"
+          value={e.address ?? ''}
+          onChange={ev => setE({ ...e, address: ev.target.value || undefined })} />
+      </Field>
       <Field label="Pay rate (AUD/hr)"><NumericInput className="input" value={e.payRate} onChange={v => setE({ ...e, payRate: v })} /></Field>
       <Field label="Weekly availability">
         <div style={{ display: 'flex', gap: 4 }}>

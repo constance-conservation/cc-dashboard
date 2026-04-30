@@ -1,191 +1,24 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import { useCCState } from '@/lib/store/CCStateContext'
 import { Icon } from '@/components/icons/Icon'
 import { Drawer } from '@/components/dashboard/Drawer'
-import { Select } from '@/components/dashboard/Select'
 import { NumericInput } from '@/components/dashboard/NumericInput'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
 import type { RosterAssignment, Activity, Employee, ActivityCarryover, CarryoverStatus } from '@/lib/types'
-
-const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
-type DayKey = typeof DAY_KEYS[number]
-const DAY_HOURS = 8
+import { DAY_KEYS, type DayKey, dateKey, weekdayIdx, weekdayName, parseDate, computeMonthlyTarget, detectUnderstaffing, autoGenerate, getProjectsWithActivitiesOnDay, computeProjectShortfalls, isLeaderRole, DAY_HOURS, type AutoGenerateOptions, type DailyWeather } from '@/lib/rostering/engine'
 
 function daysInMonth(ym: string) {
   const [y, m] = ym.split('-').map(Number)
   return new Date(y, m, 0).getDate()
 }
-function dateKey(ym: string, d: number) { return `${ym}-${String(d).padStart(2, '0')}` }
-function weekdayIdx(ym: string, d: number) {
-  const [y, m] = ym.split('-').map(Number)
-  return new Date(y, m - 1, d).getDay()
-}
-function weekdayName(ym: string, d: number): DayKey { return DAY_KEYS[weekdayIdx(ym, d)] }
 
 function prevMonthKey(ym: string): string {
   const [y, m] = ym.split('-').map(Number)
   const d = new Date(y, m - 2, 1)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-
-// ── Monthly visit target for a single activity in a given month ───────────────
-
-function computeMonthlyTarget(a: Activity, rosterMonth: string): number {
-  if (!a.start || !a.end) return 0
-  const [y, m] = rosterMonth.split('-').map(Number)
-  const monthStart = new Date(y, m - 1, 1)
-  const monthEnd   = new Date(y, m, 0)
-  const actStart   = new Date(a.start)
-  const actEnd     = new Date(a.end)
-  if (actStart > monthEnd || actEnd < monthStart) return 0
-
-  const totalDays   = Math.max(1, (actEnd.getTime() - actStart.getTime()) / 86400000)
-  const totalMonths = Math.max(1, totalDays / 30)
-  const remaining   = Math.max(0, a.totalAllocation - a.unitsCompleted)
-  return a.unit === 'days'
-    ? Math.max(1, Math.ceil(remaining / totalMonths))
-    : Math.max(1, Math.ceil(remaining / totalMonths / DAY_HOURS))
-}
-
-// ── Understaffing detection ───────────────────────────────────────────────────
-// Scans a month's roster for days where an activity had fewer crew than its minCrew.
-
-function detectUnderstaffing(
-  roster: Record<string, RosterAssignment[]>,
-  month: string,
-  activities: Activity[],
-  existingKeys: Set<string>,
-): Omit<ActivityCarryover, 'id' | 'createdAt'>[] {
-  const result: Omit<ActivityCarryover, 'id' | 'createdAt'>[] = []
-  const today = new Date().toISOString().slice(0, 10)
-
-  for (const [dKey, assignments] of Object.entries(roster)) {
-    if (!dKey.startsWith(month)) continue
-    const byActivity: Record<string, number> = {}
-    for (const a of assignments) {
-      if (a.activityId) byActivity[a.activityId] = (byActivity[a.activityId] ?? 0) + 1
-    }
-    for (const [actId, count] of Object.entries(byActivity)) {
-      const act = activities.find(a => a.id === actId)
-      if (!act || act.crewSizeType === 'any') continue
-      if (count < act.minCrew) {
-        const key = `${actId}:${dKey}`
-        if (!existingKeys.has(key)) {
-          result.push({
-            activityId: actId,
-            originalDateKey: dKey,
-            unitsMissed: 1,
-            status: 'pending',
-            reviewDate: today,
-          })
-        }
-      }
-    }
-  }
-  return result
-}
-
-// ── Activity-aware auto-generate ──────────────────────────────────────────────
-
-function autoGenerate(
-  activities: Activity[],
-  employees: Employee[],
-  rosterMonth: string,
-  approvedActivityIds: Set<string>,
-): Record<string, RosterAssignment[]> {
-  const [y, m] = rosterMonth.split('-').map(Number)
-  const monthStart = new Date(y, m - 1, 1)
-  const monthEnd   = new Date(y, m, 0)
-  const n          = monthEnd.getDate()
-
-  const eligible = activities.filter(a => {
-    if (a.status !== 'active' || !a.start || !a.end) return false
-    return new Date(a.start) <= monthEnd && new Date(a.end) >= monthStart
-  })
-  if (eligible.length === 0) return {}
-
-  const visitTargets: Record<string, number> = {}
-  eligible.forEach(a => {
-    const base = computeMonthlyTarget(a, rosterMonth)
-    visitTargets[a.id] = base + (approvedActivityIds.has(a.id) ? 1 : 0)
-  })
-
-  const hasSat = employees.some(e => e.availability.sat)
-  const days: number[] = []
-  for (let d = 1; d <= n; d++) {
-    const wd = weekdayIdx(rosterMonth, d)
-    if (wd === 0) continue
-    if (wd === 6 && !hasSat) continue
-    days.push(d)
-  }
-
-  const priorityScore: Record<string, number> = { high: 3, medium: 2, low: 1 }
-  const sorted = [...eligible].sort((a, b) =>
-    (priorityScore[b.priority] || 0) - (priorityScore[a.priority] || 0)
-  )
-  const visitCount: Record<string, number> = {}
-  eligible.forEach(a => { visitCount[a.id] = 0 })
-
-  const newRoster: Record<string, RosterAssignment[]> = {}
-
-  days.forEach((d, dayIdx) => {
-    const dKey   = dateKey(rosterMonth, d)
-    const wdName = weekdayName(rosterMonth, d)
-    const assignments: RosterAssignment[] = []
-    const usedIds = new Set<string>()
-
-    sorted.forEach(act => {
-      const target   = visitTargets[act.id] ?? 0
-      const current  = visitCount[act.id] ?? 0
-      const expected = Math.ceil((dayIdx + 1) / days.length * target)
-      if (current >= target || current >= expected) return
-
-      const avail = employees.filter(
-        e => e.availability[wdName as keyof typeof e.availability] && !usedIds.has(e.id)
-      )
-      if (avail.length === 0) return
-
-      const scored = avail.map(e => ({
-        e,
-        score: act.skills.filter(s => e.skills.includes(s)).length
-          + (e.role === 'Field Supervisor' ? 0.5 : 0),
-      })).sort((a, b) => b.score - a.score)
-
-      const minNeeded  = act.crewSizeType === 'any' ? 1 : act.minCrew
-      const maxAllowed = act.crewSizeType === 'range' && act.maxCrew
-        ? act.maxCrew
-        : act.crewSizeType === 'any' ? avail.length : act.minCrew
-
-      if (scored.length < minNeeded) return
-
-      let hasSup = false
-      const chosen: Employee[] = []
-      for (const { e } of scored) {
-        if (chosen.length >= maxAllowed) break
-        if (e.role === 'Field Supervisor') { if (hasSup) continue; hasSup = true }
-        chosen.push(e)
-      }
-      if (chosen.length < minNeeded) return
-
-      chosen.forEach(e => {
-        usedIds.add(e.id)
-        assignments.push({
-          employeeId: e.id,
-          projectId:  act.projectId,
-          activityId: act.id,
-          siteId:     act.siteId,
-        })
-      })
-      visitCount[act.id] = (visitCount[act.id] ?? 0) + 1
-    })
-
-    if (assignments.length > 0) newRoster[dKey] = assignments
-  })
-
-  return newRoster
 }
 
 // ── Carryover review ──────────────────────────────────────────────────────────
@@ -296,7 +129,6 @@ function CalDay({ day, ym, state, onOpen }: {
     <div className={`cal-cell${isPast ? ' cal-cell-past' : ''}`} onClick={onOpen}>
       <div className="cal-date">
         {day}
-        {isPast && <span className="cal-lock">🔒</span>}
       </div>
       {Object.keys(byProject).length === 0 && (
         <div className="cal-empty-label">— no assignments —</div>
@@ -308,9 +140,16 @@ function CalDay({ day, ym, state, onOpen }: {
           ? state.activities.find(a => a.id === activityId)
           : state.activities.find(a => a.projectId === pid && a.status === 'active')
         const crewSize = act?.crewSizeType !== 'any' ? (act?.minCrew ?? null) : null
+        const hasLeader = empIds.some(eid => {
+          const e = state.employees.find(x => x.id === eid)
+          return e && isLeaderRole(e.role)
+        })
         return (
           <div key={pid} className="cal-shift">
-            <div className="cal-shift-name">{p.name.split(' — ')[0]}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <div className="cal-shift-name" style={{ flex: 1, minWidth: 0 }}>{p.name.split(' — ')[0]}</div>
+              {!hasLeader && <span title="No supervisor or team leader assigned" style={{ fontSize: 8, color: '#d97706', flexShrink: 0 }}>⚠</span>}
+            </div>
             {activityId && act && (
               <div style={{ fontSize: 9, color: 'var(--ink-3)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {act.name}
@@ -321,12 +160,12 @@ function CalDay({ day, ym, state, onOpen }: {
                 {empIds.slice(0, 4).map((eid, i) => {
                   const e     = state.employees.find(x => x.id === eid)
                   if (!e) return null
-                  const isSup = e.role === 'Field Supervisor'
+                  const isLeader = isLeaderRole(e.role)
                   return (
                     <div key={eid}
-                      className={`cal-avatar${isSup ? ' sup' : ''}`}
+                      className={`cal-avatar${isLeader ? ' sup' : ''}`}
                       style={{ marginLeft: i === 0 ? 0 : -5 }}
-                      title={`${e.name} · ${e.role}`}>
+                      title={`${e.name} · ${e.role || 'Field Worker'}`}>
                       {e.name.split(' ').map(x => x[0]).join('').slice(0, 2)}
                     </div>
                   )
@@ -354,167 +193,270 @@ function DayEditor({ day, ym, state, onClose }: {
   state: ReturnType<typeof useCCState>
   onClose: () => void
 }) {
-  const dKey        = dateKey(ym, day)
-  const wdName      = weekdayName(ym, day)
+  const [y, m]  = ym.split('-').map(Number)
+  const dKey    = dateKey(ym, day)
+  const wdName  = weekdayName(ym, day)
+  const dayDate = new Date(y, m - 1, day)
+  const isPast  = dKey < TODAY_KEY
+
+  const dateLabel = dayDate.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })
+
   const assignments = state.roster[dKey] || []
-  const date        = new Date(`${ym}-${String(day).padStart(2, '0')}`)
-  const dateLabel   = date.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })
-  const isPast      = dKey < TODAY_KEY
+  const update      = (next: RosterAssignment[]) => state.updateDay(dKey, next)
 
-  const available           = state.employees.filter(e => e.availability[wdName as keyof typeof e.availability])
-  const assignedIds         = new Set(assignments.map(a => a.employeeId))
-  const unassignedAvailable = available.filter(e => !assignedIds.has(e.id))
-  const unavailable         = state.employees.filter(e => !e.availability[wdName as keyof typeof e.availability])
+  const [search,       setSearch]       = useState('')
+  const [addingTo,     setAddingTo]     = useState<string | null>(null)
+  const [collapsed,    setCollapsed]    = useState<Set<string>>(new Set())
+  const [actSearch,    setActSearch]    = useState<Record<string, string>>({})
+  const [dropdownOpen, setDropdownOpen] = useState<Record<string, boolean>>({})
+  const [manuallyAdded, setManuallyAdded] = useState<Set<string>>(new Set())
 
-  const activeProjects = state.projects.filter(p => {
-    const s = new Date(p.start), en = new Date(p.end)
-    return date >= s && date <= en
-  })
+  const available       = state.employees.filter(e => e.availability[wdName as keyof typeof e.availability])
+  const assignedIds     = new Set(assignments.map(a => a.employeeId))
+  const unassignedAvail = available.filter(e => !assignedIds.has(e.id))
 
-  const update           = (next: RosterAssignment[]) => state.updateDay(dKey, next)
-  const removeAssignment = (empId: string) => update(assignments.filter(a => a.employeeId !== empId))
-  const changeProject    = (empId: string, projectId: string) =>
-    update(assignments.map(a =>
-      a.employeeId === empId ? { ...a, projectId, activityId: undefined, siteId: undefined } : a
-    ))
+  // Projects with active activities on this day, plus any already-assigned projects
+  const projectsForDay = useMemo(
+    () => getProjectsWithActivitiesOnDay(state.projects, state.activities, dayDate),
+    [state.projects, state.activities, dayDate.toISOString()]
+  )
+  const assignedProjectIds = new Set(assignments.map(a => a.projectId))
+  const allAssignedIds = new Set([...assignedProjectIds, ...manuallyAdded])
+  const extraProjects = state.projects.filter(
+    p => assignedProjectIds.has(p.id) && !projectsForDay.find(ap => ap.id === p.id)
+  )
+  const allProjects = [...projectsForDay, ...extraProjects]
+  const filtered = search.trim()
+    ? allProjects.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+    : allProjects
+
+  // Pre-fill actSearch with current activity label when assignments change
+  useEffect(() => {
+    setActSearch(prev => {
+      const next = { ...prev }
+      assignments.forEach(a => {
+        if (a.activityId && !next[a.employeeId]) {
+          const actLabel = state.activities.find(x => x.id === a.activityId)?.name ?? ''
+          if (actLabel) next[a.employeeId] = actLabel
+        }
+      })
+      return next
+    })
+  }, [assignments])
+
   const changeActivity = (empId: string, activityId: string) => {
     const act = activityId ? state.activities.find(a => a.id === activityId) : undefined
     update(assignments.map(a =>
       a.employeeId === empId ? { ...a, activityId: activityId || undefined, siteId: act?.siteId } : a
     ))
   }
-  const addTo = (empId: string, projectId: string) =>
+  const removeAssignment = (empId: string) => update(assignments.filter(a => a.employeeId !== empId))
+  const addStaff = (empId: string, projectId: string) => {
     update([...assignments, { employeeId: empId, projectId }])
+    setAddingTo(null)
+  }
   const toggleOvertime = (empId: string, hours: number) =>
     update(assignments.map(a => a.employeeId === empId ? { ...a, overtimeHours: hours } : a))
 
-  const subtitle = `${assignments.length} assigned · ${unassignedAvailable.length} available · ${unavailable.length} unavailable`
+  const subtitle = `${assignments.length} assigned · ${unassignedAvail.length} available`
 
   return (
     <Drawer title={dateLabel} subtitle={subtitle} onClose={onClose} saveLabel="Done" onSave={onClose}>
       {isPast && (
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 7,
-          padding: '8px 12px', background: 'var(--bg-sunken)',
-          borderRadius: 6, marginBottom: 14, fontSize: 12, color: 'var(--ink-3)',
+          display: 'flex', alignItems: 'center', gap: 7, padding: '8px 12px',
+          background: 'var(--bg-sunken)', borderRadius: 6, marginBottom: 14,
+          fontSize: 12, color: 'var(--ink-3)',
         }}>
           <Icon name="lock" size={12} /> Past day — edits are still saved
         </div>
       )}
 
-      {/* Assigned */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)', marginBottom: 10 }}>
-          Assigned ({assignments.length})
-        </div>
-        {assignments.length === 0 && (
-          <div style={{ fontSize: 13, color: 'var(--ink-3)', padding: 12, background: 'var(--bg-sunken)', borderRadius: 6 }}>
-            No one assigned to this day yet.
+      {/* Section 1: Assigned projects */}
+      {allAssignedIds.size > 0 && (
+        <>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
+            Assigned ({allAssignedIds.size})
           </div>
-        )}
-        {assignments.map(a => {
-          const emp     = state.employees.find(x => x.id === a.employeeId)
-          if (!emp) return null
-          const canOT   = state.activities.some(act => act.projectId === a.projectId && act.status === 'active' && act.overtimeFlag)
-          const actOpts = state.activities
-            .filter(act => act.projectId === a.projectId && act.status === 'active')
-            .map(act => ({ value: act.id, label: act.name }))
-          return (
-            <div key={a.employeeId} style={{
-              display: 'flex', gap: 10, alignItems: 'flex-start',
-              padding: 10, background: 'var(--bg-sunken)', borderRadius: 6, marginBottom: 6,
-            }}>
-              <div className="staff-avatar" style={{ width: 30, height: 30, fontSize: 10, flexShrink: 0, marginTop: 2 }}>
-                {emp.name.split(' ').map(x => x[0]).join('')}
-              </div>
-              <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  {emp.role}
+          {[...allAssignedIds].map(pid => {
+            const project = state.projects.find(p => p.id === pid)
+            if (!project) return null
+            const projAssignments = assignments.filter(a => a.projectId === pid)
+            const isCollapsed = collapsed.has(pid)
+            const actOpts = state.activities
+              .filter(a => a.projectId === pid && a.status === 'active'
+                && parseDate(a.start) <= dayDate && parseDate(a.end) >= dayDate)
+              .map(a => ({ value: a.id, label: a.name }))
+
+            const hasLeader = projAssignments.some(a => {
+              const e = state.employees.find(x => x.id === a.employeeId)
+              return e && isLeaderRole(e.role)
+            })
+            return (
+              <div key={pid} style={{ marginBottom: 8, border: `1px solid ${!hasLeader && projAssignments.length > 0 ? '#d97706' : 'var(--line)'}`, borderRadius: 8, overflow: 'hidden' }}>
+                {/* Collapsible header */}
+                <div style={{ display: 'flex', alignItems: 'center', padding: '9px 12px', background: 'var(--bg-sunken)', gap: 8 }}>
+                  <button
+                    style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, textAlign: 'left' }}
+                    onClick={() => setCollapsed(prev => { const next = new Set(prev); next.has(pid) ? next.delete(pid) : next.add(pid); return next })}
+                  >
+                    <span style={{ fontSize: 9, color: 'var(--ink-3)', transition: 'transform 0.15s', display: 'inline-block', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>▼</span>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>{project.name}</span>
+                    <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+                      {projAssignments.length} staff
+                    </span>
+                    {!hasLeader && projAssignments.length > 0 && (
+                      <span style={{ fontSize: 10, color: '#d97706', fontFamily: 'var(--font-mono)' }}>⚠ no supervisor</span>
+                    )}
+                  </button>
+                  <button
+                    className="btn"
+                    style={{ fontSize: 11, padding: '3px 10px', height: 26, flexShrink: 0, color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                    onClick={() => {
+                      update(assignments.filter(a => a.projectId !== pid))
+                      setManuallyAdded(prev => { const n = new Set(prev); n.delete(pid); return n })
+                      if (addingTo === pid) setAddingTo(null)
+                    }}
+                  >
+                    Remove
+                  </button>
                 </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'stretch' }}>
-                <Select
-                  value={a.projectId}
-                  onChange={v => changeProject(a.employeeId, v)}
-                  options={activeProjects.map(p => ({ value: p.id, label: p.name }))}
-                  style={{ fontSize: 12, width: 180 }}
-                />
-                {actOpts.length > 0 && (
-                  <Select
-                    value={a.activityId ?? ''}
-                    placeholder="No activity…"
-                    onChange={v => changeActivity(a.employeeId, v)}
-                    options={actOpts}
-                    style={{ fontSize: 11, width: 180 }}
-                  />
-                )}
-                {canOT && (
-                  <NumericInput
-                    className="input"
-                    placeholder="OT hrs"
-                    value={a.overtimeHours ?? 0}
-                    onChange={v => toggleOvertime(a.employeeId, v)}
-                    style={{ width: 180, fontSize: 12 }}
-                  />
-                )}
-              </div>
-              <button className="iconbtn" onClick={() => removeAssignment(a.employeeId)} style={{ color: 'var(--ink-3)', flexShrink: 0 }}>
-                <Icon name="close" size={14} />
-              </button>
-            </div>
-          )
-        })}
-      </div>
 
-      {/* Available */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)', marginBottom: 10 }}>
-          Available ({unassignedAvailable.length})
-        </div>
-        {unassignedAvailable.map(emp => (
-          <div key={emp.id} style={{
-            display: 'flex', gap: 10, alignItems: 'center',
-            padding: 10, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 6, marginBottom: 6,
-          }}>
-            <div className="staff-avatar" style={{ width: 30, height: 30, fontSize: 10 }}>
-              {emp.name.split(' ').map(x => x[0]).join('')}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                {emp.role} · {emp.skills.slice(0, 2).join(', ')}
-              </div>
-            </div>
-            <Select
-              value=""
-              placeholder="+ Add to project…"
-              onChange={v => { if (v) addTo(emp.id, v) }}
-              options={activeProjects.map(p => ({ value: p.id, label: p.name }))}
-              style={{ fontSize: 12, maxWidth: 200 }}
-            />
-          </div>
-        ))}
-        {unassignedAvailable.length === 0 && (
-          <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>All available staff are assigned.</div>
-        )}
-      </div>
+                {!isCollapsed && (
+                  <>
+                    {/* Assigned staff */}
+                    {projAssignments.map(a => {
+                      const emp = state.employees.find(x => x.id === a.employeeId)
+                      if (!emp) return null
+                      const query = actSearch[a.employeeId] ?? ''
+                      const isOpen = !!dropdownOpen[a.employeeId]
+                      const filteredOpts = actOpts.filter(o => o.label.toLowerCase().includes(query.toLowerCase()))
+                      return (
+                        <div key={a.employeeId} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '9px 12px', background: 'var(--bg-elev)', borderTop: '1px solid var(--line)' }}>
+                          <div className="staff-avatar" style={{ width: 28, height: 28, fontSize: 10, flexShrink: 0, marginTop: 1 }}>
+                            {emp.name.split(' ').map((x: string) => x[0]).join('')}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 500 }}>{emp.name}</div>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{emp.role || 'Field Worker'}</div>
+                            {actOpts.length > 0 && (
+                              <div style={{ marginTop: 5, position: 'relative' }}>
+                                <input
+                                  className="input"
+                                  placeholder="Search activity…"
+                                  value={query}
+                                  onChange={ev => setActSearch(prev => ({ ...prev, [a.employeeId]: ev.target.value }))}
+                                  onFocus={() => setDropdownOpen(prev => ({ ...prev, [a.employeeId]: true }))}
+                                  onBlur={() => setTimeout(() => setDropdownOpen(prev => ({ ...prev, [a.employeeId]: false })), 150)}
+                                  style={{ fontSize: 11, width: '100%' }}
+                                />
+                                {isOpen && filteredOpts.length > 0 && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginTop: 3 }}>
+                                    {filteredOpts.map(opt => (
+                                      <button
+                                        key={opt.value}
+                                        style={{
+                                          textAlign: 'left', padding: '4px 8px', fontSize: 11, borderRadius: 4, cursor: 'pointer',
+                                          background: a.activityId === opt.value ? 'var(--accent-soft)' : 'var(--bg-sunken)',
+                                          color: a.activityId === opt.value ? 'var(--accent)' : 'var(--ink-2)',
+                                          border: 'none', width: '100%',
+                                        }}
+                                        onMouseDown={e => e.preventDefault()}
+                                        onClick={() => {
+                                          changeActivity(a.employeeId, opt.value)
+                                          setActSearch(prev => ({ ...prev, [a.employeeId]: opt.label }))
+                                          setDropdownOpen(prev => ({ ...prev, [a.employeeId]: false }))
+                                        }}
+                                      >
+                                        {opt.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <button className="iconbtn" onClick={() => removeAssignment(a.employeeId)}
+                            style={{ color: 'var(--ink-3)', flexShrink: 0, marginTop: 2 }}>
+                            <Icon name="close" size={13} />
+                          </button>
+                        </div>
+                      )
+                    })}
 
-      {/* Unavailable */}
-      {unavailable.length > 0 && (
-        <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-4)', marginBottom: 10 }}>
-            Unavailable ({unavailable.length}) — visibility only
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {unavailable.map(e => (
-              <span key={e.id} style={{ padding: '4px 8px', background: 'var(--bg-sunken)', borderRadius: 4, fontSize: 11, color: 'var(--ink-3)' }}>
-                {e.name}
-              </span>
-            ))}
-          </div>
+                    {/* + Add staff button and picker */}
+                    {addingTo !== pid && (
+                      <div style={{ padding: '8px 12px', borderTop: projAssignments.length > 0 ? '1px solid var(--line)' : undefined, background: 'var(--bg-elev)' }}>
+                        <button
+                          className="btn"
+                          style={{ fontSize: 11, padding: '3px 10px', height: 26 }}
+                          onClick={() => setAddingTo(pid)}
+                        >
+                          + Add staff
+                        </button>
+                      </div>
+                    )}
+                    {addingTo === pid && (
+                      <div style={{ borderTop: '1px solid var(--line)' }}>
+                        {unassignedAvail.length === 0 ? (
+                          <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)', background: 'var(--bg-elev)' }}>All available staff are already assigned.</div>
+                        ) : (
+                          unassignedAvail.map((emp, i) => (
+                            <button key={emp.id} onClick={() => addStaff(emp.id, pid)}
+                              style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', padding: '8px 12px', background: 'var(--bg-elev)', cursor: 'pointer', textAlign: 'left', borderTop: i > 0 ? '1px solid var(--line)' : 'none' }}>
+                              <div className="staff-avatar" style={{ width: 26, height: 26, fontSize: 9, flexShrink: 0 }}>
+                                {emp.name.split(' ').map((x: string) => x[0]).join('')}
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 12, fontWeight: 500 }}>{emp.name}</div>
+                                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                  {emp.role}{emp.skills.length > 0 ? ' · ' + emp.skills.slice(0, 2).join(', ') : ''}
+                                </div>
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )
+          })}
+          <div style={{ height: 1, background: 'var(--line)', margin: '8px 0 14px' }} />
+        </>
+      )}
+
+      {/* Section 2: Projects with active activities not yet assigned */}
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
+        Projects
+      </div>
+      <input className="input" placeholder="Search projects…" value={search}
+        onChange={e => setSearch(e.target.value)} style={{ width: '100%', marginBottom: 10 }} />
+
+      {filtered.filter(p => !allAssignedIds.has(p.id)).length === 0 && (
+        <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+          {search ? 'No projects match.' : allAssignedIds.size > 0 ? 'All active projects assigned.' : 'No active projects on this day.'}
         </div>
       )}
+
+      {filtered.filter(p => !allAssignedIds.has(p.id)).map(project => (
+        <div key={project.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--line)', borderRadius: 8, marginBottom: 6 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500 }}>{project.name}</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', marginTop: 2 }}>
+              {state.activities.filter(a => a.projectId === project.id && a.status === 'active' && parseDate(a.start) <= dayDate && parseDate(a.end) >= dayDate).length} active activities
+            </div>
+          </div>
+          <button
+            className="btn primary"
+            style={{ fontSize: 11, padding: '3px 10px', height: 26, flexShrink: 0 }}
+            onClick={() => setManuallyAdded(prev => { const n = new Set(prev); n.add(project.id); return n })}
+          >
+            Add
+          </button>
+        </div>
+      ))}
     </Drawer>
   )
 }
@@ -541,15 +483,252 @@ function RulesModal({ onClose }: { onClose: () => void }) {
   )
 }
 
+// ── Projects drawer ───────────────────────────────────────────────────────────
+
+function ProjectsDrawer({ state, rosterMonth, activityVisits, shortfallProjectIds, onClose }: {
+  state: ReturnType<typeof useCCState>
+  rosterMonth: string
+  activityVisits: Record<string, number>
+  shortfallProjectIds: Set<string>
+  onClose: () => void
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  const [y, m] = rosterMonth.split('-').map(Number)
+  const monthStart = new Date(y, m - 1, 1)
+  const monthEnd   = new Date(y, m, 0)
+
+  const activeProjects = useMemo(() =>
+    state.projects.filter(p => {
+      if (!p.start || !p.end) return false
+      return parseDate(p.start) <= monthEnd && parseDate(p.end) >= monthStart
+    }),
+    [state.projects, rosterMonth]
+  )
+
+  const projectActivities = useMemo(() => {
+    const map = new Map<string, Array<{ activity: Activity; target: number }>>()
+    for (const p of activeProjects) {
+      const items = state.activities
+        .filter(a => a.projectId === p.id && a.status === 'active')
+        .map(a => ({ activity: a, target: computeMonthlyTarget(a, rosterMonth, state.allocations) }))
+        .filter(x => x.target > 0)
+      map.set(p.id, items)
+    }
+    return map
+  }, [activeProjects, state.activities, state.allocations, rosterMonth])
+
+  const toggle = (pid: string) =>
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.has(pid) ? next.delete(pid) : next.add(pid)
+      return next
+    })
+
+  const monthName = new Date(y, m - 1, 1).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })
+
+  return (
+    <Drawer
+      title="Projects"
+      subtitle={`${activeProjects.length} active in ${monthName}`}
+      onClose={onClose}
+      saveLabel="Done"
+      onSave={onClose}
+    >
+      {activeProjects.length === 0 && (
+        <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>No active projects this month.</div>
+      )}
+      {activeProjects.map(project => {
+        const items      = projectActivities.get(project.id) ?? []
+        const isExpanded = expanded.has(project.id)
+        const hasShortfall = shortfallProjectIds.has(project.id)
+        return (
+          <div key={project.id} style={{ marginBottom: 8 }}>
+            <button
+              onClick={() => toggle(project.id)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                padding: '10px 12px', background: hasShortfall ? 'oklch(0.97 0.03 60)' : 'var(--bg-sunken)',
+                border: `1px solid ${hasShortfall ? '#d97706' : 'var(--line)'}`,
+                borderRadius: isExpanded ? '8px 8px 0 0' : 8,
+                cursor: 'pointer', textAlign: 'left',
+              }}
+            >
+              <span style={{
+                fontSize: 9, color: 'var(--ink-3)',
+                display: 'inline-block', transition: 'transform 0.15s',
+                transform: isExpanded ? 'rotate(90deg)' : 'none',
+              }}>▶</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{project.name}</div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: hasShortfall ? '#d97706' : 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 2 }}>
+                  {hasShortfall
+                    ? '⚠ activities under target this month'
+                    : items.length > 0
+                      ? `${items.length} activit${items.length !== 1 ? 'ies' : 'y'} scheduled`
+                      : 'No activities allocated this month'}
+                </div>
+              </div>
+            </button>
+            {isExpanded && (
+              <div style={{ border: '1px solid var(--line)', borderTop: 'none', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+                {items.length === 0 ? (
+                  <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--ink-3)', background: 'var(--bg-elev)' }}>
+                    No activities with allocation this month.
+                  </div>
+                ) : (
+                  items.map(({ activity: act, target }, i) => {
+                    const monthVisits  = activityVisits[act.id] || 0
+                    const monthPct     = target > 0 ? Math.min(100, Math.round(monthVisits / target * 100)) : 0
+                    const overallPct   = act.totalAllocation > 0
+                      ? Math.min(100, Math.round(act.unitsCompleted / act.totalAllocation * 100))
+                      : 0
+                    const isUnder = monthVisits < target
+                    const monthLabel = act.unit === 'hours'
+                      ? `${monthVisits * DAY_HOURS}/${target * DAY_HOURS} hrs`
+                      : `${monthVisits}/${target} days`
+                    return (
+                      <div key={act.id} style={{
+                        padding: '12px 14px',
+                        background: isUnder ? 'oklch(0.99 0.015 60)' : 'var(--bg-elev)',
+                        borderTop: i > 0 ? '1px solid var(--line)' : 'none',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 10 }}>
+                          <span style={{ fontSize: 12, fontWeight: 500 }}>{act.name}</span>
+                          {isUnder && <span style={{ fontSize: 9, color: '#d97706', fontFamily: 'var(--font-mono)' }}>under target</span>}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                          {/* This month */}
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>This month</span>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: isUnder ? '#d97706' : 'var(--ink-2)' }}>{monthLabel}</span>
+                            </div>
+                            <div style={{ height: 4, background: 'var(--bg-sunken)', borderRadius: 2 }}>
+                              <div style={{ height: '100%', width: monthPct + '%', background: monthPct >= 100 ? 'var(--ok)' : isUnder ? '#d97706' : 'var(--accent)', borderRadius: 2, transition: 'width 0.3s' }} />
+                            </div>
+                          </div>
+                          {/* Overall */}
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Overall</span>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-2)' }}>{act.unitsCompleted}/{act.totalAllocation} {act.unit}</span>
+                            </div>
+                            <div style={{ height: 4, background: 'var(--bg-sunken)', borderRadius: 2 }}>
+                              <div style={{ height: '100%', width: overallPct + '%', background: overallPct >= 100 ? 'var(--ok)' : 'var(--ink-3)', borderRadius: 2, transition: 'width 0.3s' }} />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </Drawer>
+  )
+}
+
+// ── Shortfall rollover modal ──────────────────────────────────────────────────
+
+type ShortfallEntry = {
+  activityId: string
+  activityName: string
+  projectName: string
+  target: number
+  actual: number
+  unit: string
+  selected: boolean
+}
+
+function ShortfallModal({ entries, rosterMonth, onChange, onConfirm, onClose }: {
+  entries: ShortfallEntry[]
+  rosterMonth: string
+  onChange: (idx: number, selected: boolean) => void
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  const selectedCount = entries.filter(e => e.selected).length
+  const [ry, rm] = rosterMonth.split('-').map(Number)
+  const nextMonthLabel = new Date(ry, rm, 1).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })
+
+  return (
+    <Drawer
+      title="Activities not fully rostered"
+      subtitle={`${entries.length} activit${entries.length !== 1 ? 'ies' : 'y'} below target · ${selectedCount} set to roll over`}
+      onClose={onClose}
+      onSave={onConfirm}
+      saveLabel={selectedCount > 0 ? `Roll ${selectedCount} to ${nextMonthLabel}` : 'Dismiss'}
+    >
+      <div style={{ marginBottom: 14, fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+        These activities couldn't be fully rostered — due to weather, no available supervisor, or insufficient working days. Select which to carry over into {nextMonthLabel}.
+      </div>
+      {entries.map((entry, idx) => {
+        const shortfall = entry.target - entry.actual
+        const shortfallLabel = entry.unit === 'hours'
+          ? `${shortfall * DAY_HOURS} hr${shortfall * DAY_HOURS !== 1 ? 's' : ''} short`
+          : `${shortfall} day${shortfall !== 1 ? 's' : ''} short`
+        const progressLabel = entry.unit === 'hours'
+          ? `${entry.actual * DAY_HOURS}/${entry.target * DAY_HOURS} hrs`
+          : `${entry.actual}/${entry.target} days`
+        return (
+          <div key={idx} style={{
+            display: 'flex', gap: 10, alignItems: 'center',
+            padding: '10px 12px', background: 'var(--bg-sunken)',
+            borderRadius: 6, marginBottom: 6,
+            border: `1px solid ${entry.selected ? 'var(--accent)' : 'transparent'}`,
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{entry.activityName}</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+                {entry.projectName} · {progressLabel} · <span style={{ color: '#d97706' }}>{shortfallLabel}</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                className={`btn${entry.selected ? ' primary' : ''}`}
+                style={{ fontSize: 11, padding: '3px 10px', height: 26 }}
+                onClick={() => onChange(idx, true)}
+              >
+                Roll over
+              </button>
+              <button
+                className="btn"
+                style={{ fontSize: 11, padding: '3px 10px', height: 26, color: !entry.selected ? 'var(--ink-1)' : 'var(--ink-3)' }}
+                onClick={() => onChange(idx, false)}
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+        )
+      })}
+      <div style={{ marginTop: 8 }}>
+        <button className="btn" style={{ fontSize: 11, color: 'var(--ink-3)' }}
+          onClick={() => entries.forEach((_, i) => onChange(i, false))}>
+          Skip all
+        </button>
+      </div>
+    </Drawer>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function RosteringPage() {
   const state = useCCState()
   const [selectedDay, setSelectedDay]                 = useState<number | null>(null)
   const [showHelp, setShowHelp]                       = useState(false)
+  const [showProjects, setShowProjects]               = useState(false)
   const [confirmAction, setConfirmAction]             = useState<'autogen' | 'clear' | null>(null)
   const [showCarryoverReview, setShowCarryoverReview] = useState(false)
   const [reviewEntries, setReviewEntries]             = useState<ReviewEntry[]>([])
+  const [generating, setGenerating]                   = useState(false)
+  const [shortfallEntries, setShortfallEntries]       = useState<ShortfallEntry[]>([])
+  const [showShortfall, setShowShortfall]             = useState(false)
 
   const n = daysInMonth(state.rosterMonth)
   const hasSat = state.employees.some(e => e.availability.sat)
@@ -575,26 +754,97 @@ export default function RosteringPage() {
         }
       })
     }
-    return { totalShifts, uniqueStaff: uniqueStaff.size, activityVisits }
-  }, [state.roster, state.rosterMonth])
-
-  // ── KPI: active activities that have a target this month ───────────────────
-  const activeActivityTargets = useMemo(() =>
-    state.activities
-      .filter(a => a.status === 'active')
-      .map(a => ({ activity: a, target: computeMonthlyTarget(a, state.rosterMonth) }))
-      .filter(x => x.target > 0),
-    [state.activities, state.rosterMonth]
-  )
+    const shortfallProjectIds = computeProjectShortfalls(state.roster, state.activities, state.allocations, state.rosterMonth)
+    return { totalShifts, uniqueStaff: uniqueStaff.size, activityVisits, shortfallProjectIds }
+  }, [state.roster, state.rosterMonth, state.activities, state.allocations])
 
   // ── Auto-generate helpers ──────────────────────────────────────────────────
 
-  function runAutoGenerate(approvedActivityIds: Set<string>) {
-    const generated = autoGenerate(state.activities, state.employees, state.rosterMonth, approvedActivityIds)
-    const newRoster = { ...state.roster }
-    Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
-    Object.assign(newRoster, generated)
-    state.setRoster(newRoster)
+  async function runAutoGenerate(approvedActivityIds: Set<string>) {
+    setGenerating(true)
+    try {
+      const [y, m] = state.rosterMonth.split('-').map(Number)
+      const monthStart = `${state.rosterMonth}-01`
+      const monthEnd   = `${state.rosterMonth}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`
+
+      const weather: Record<string, Record<string, DailyWeather>> = {}
+      const locatedProjects = state.projects.filter(p => p.lat != null && p.lng != null)
+      await Promise.all(locatedProjects.map(async p => {
+        try {
+          const url = `https://api.open-meteo.com/v1/forecast?latitude=${p.lat}&longitude=${p.lng}&daily=precipitation_sum,windspeed_10m_max,temperature_2m_max,temperature_2m_min&timezone=auto&start_date=${monthStart}&end_date=${monthEnd}`
+          const res  = await fetch(url)
+          const data = await res.json() as {
+            daily?: {
+              time: string[]
+              precipitation_sum: number[]
+              windspeed_10m_max: number[]
+              temperature_2m_max: number[]
+              temperature_2m_min: number[]
+            }
+          }
+          if (data.daily?.time) {
+            weather[p.id] = {}
+            data.daily.time.forEach((date, i) => {
+              weather[p.id][date] = {
+                precipitation_mm: data.daily!.precipitation_sum[i]    ?? 0,
+                wind_speed_kmh:   data.daily!.windspeed_10m_max[i]    ?? 0,
+                temp_max_c:       data.daily!.temperature_2m_max[i]   ?? 20,
+                temp_min_c:       data.daily!.temperature_2m_min[i]   ?? 10,
+              }
+            })
+          }
+        } catch {
+          // weather unavailable — engine skips weather constraints for this project
+        }
+      }))
+
+      const options: AutoGenerateOptions = {
+        projects:     state.projects.map(p => ({ id: p.id, lat: p.lat, lng: p.lng })),
+        activityTypes: state.activityTypes.map(t => ({
+          id:                   t.id,
+          requiredEquipmentIds: t.requiredEquipmentIds ?? [],
+          weatherConstraints:   t.weatherConstraints   ?? [],
+        })),
+        weather,
+      }
+
+      const generated = autoGenerate(state.activities, state.employees, state.rosterMonth, approvedActivityIds, state.allocations, options)
+      const newRoster = { ...state.roster }
+      Object.keys(newRoster).forEach(k => { if (k.startsWith(state.rosterMonth)) delete newRoster[k] })
+      Object.assign(newRoster, generated)
+      state.setRoster(newRoster)
+
+      // Detect all activities that fell below their monthly target (any reason)
+      const shortfalls: ShortfallEntry[] = []
+      for (const act of state.activities) {
+        if (act.status !== 'active') continue
+        const target = computeMonthlyTarget(act, state.rosterMonth, state.allocations)
+        if (target <= 0) continue
+        let visits = 0
+        for (const dKey in generated) {
+          if (!dKey.startsWith(state.rosterMonth)) continue
+          if (generated[dKey].some(a => a.activityId === act.id)) visits++
+        }
+        if (visits < target) {
+          const project = state.projects.find(p => p.id === act.projectId)
+          shortfalls.push({
+            activityId: act.id,
+            activityName: act.name,
+            projectName: project?.name ?? 'Unknown project',
+            target,
+            actual: visits,
+            unit: act.unit,
+            selected: true,
+          })
+        }
+      }
+      if (shortfalls.length > 0) {
+        setShortfallEntries(shortfalls)
+        setShowShortfall(true)
+      }
+    } finally {
+      setGenerating(false)
+    }
   }
 
   const handleAutoGen = () => {
@@ -658,6 +908,22 @@ export default function RosteringPage() {
     runAutoGenerate(new Set())
   }
 
+  const handleShortfallConfirm = () => {
+    setShowShortfall(false)
+    const [ry, rm] = state.rosterMonth.split('-').map(Number)
+    const lastDay = new Date(ry, rm, 0).getDate()
+    const originalDateKey = `${state.rosterMonth}-${String(lastDay).padStart(2, '0')}`
+    const newCarryovers = shortfallEntries
+      .filter(e => e.selected)
+      .map(e => ({
+        activityId: e.activityId,
+        originalDateKey,
+        unitsMissed: e.target - e.actual,
+        status: 'approved' as CarryoverStatus,
+      }))
+    if (newCarryovers.length > 0) state.addCarryovers(newCarryovers)
+  }
+
   const handleConfirmClear = () => {
     setConfirmAction(null)
     const newRoster = { ...state.roster }
@@ -707,39 +973,21 @@ export default function RosteringPage() {
 
       <div className="subpage-body">
         <div style={{ display: 'flex', gap: 10, marginBottom: 18, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn primary" onClick={handleAutoGen}><Icon name="cloud" size={14} /> Auto-generate</button>
+          <button className="btn primary" onClick={handleAutoGen} disabled={generating}><Icon name="cloud" size={14} /> {generating ? 'Generating…' : 'Auto-generate'}</button>
           <button className="btn" onClick={() => setConfirmAction('clear')}>Clear month</button>
           <button className="btn" onClick={() => setShowHelp(true)}>Rules</button>
+          <button className="btn" onClick={() => setShowProjects(true)}>Projects</button>
           <div style={{ flex: 1 }} />
           <button className="btn" onClick={prevMonth}>←</button>
           <div className="chip" style={{ fontFamily: 'var(--font-display)', fontSize: 16, height: 32, padding: '0 14px', textTransform: 'none', letterSpacing: '-0.01em' }}>
             {monthName}
           </div>
           <button className="btn" onClick={nextMonth}>→</button>
+          <button className="btn" onClick={() => {
+            const t = new Date()
+            state.setRosterMonth(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`)
+          }}>Today</button>
         </div>
-
-        {/* Activity KPI mini-cards */}
-        {activeActivityTargets.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginBottom: 18 }}>
-            {activeActivityTargets.slice(0, 8).map(({ activity: act, target }) => {
-              const project = state.projects.find(p => p.id === act.projectId)
-              const visits  = stats.activityVisits[act.id] || 0
-              const pct     = target > 0 ? Math.min(100, Math.round(visits / target * 100)) : 0
-              return (
-                <div key={act.id} style={{ padding: 14, background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 10 }}>
-                  <div style={{ fontSize: 12, fontWeight: 500, letterSpacing: '-0.005em', marginBottom: 1 }}>{act.name}</div>
-                  <div style={{ fontSize: 10, color: 'var(--ink-4)', marginBottom: 4 }}>{project?.name}</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
-                    {visits}/{target} visits · {act.unit}
-                  </div>
-                  <div style={{ height: 4, background: 'var(--bg-sunken)', borderRadius: 2 }}>
-                    <div style={{ height: '100%', width: pct + '%', background: pct >= 100 ? 'var(--ok)' : 'var(--accent)', borderRadius: 2 }} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
 
         {/* Calendar */}
         <div className="cal">
@@ -760,6 +1008,27 @@ export default function RosteringPage() {
         <DayEditor day={selectedDay} ym={state.rosterMonth} state={state} onClose={() => setSelectedDay(null)} />
       )}
       {showHelp && <RulesModal onClose={() => setShowHelp(false)} />}
+      {showProjects && (
+        <ProjectsDrawer
+          state={state}
+          rosterMonth={state.rosterMonth}
+          activityVisits={stats.activityVisits}
+          shortfallProjectIds={stats.shortfallProjectIds}
+          onClose={() => setShowProjects(false)}
+        />
+      )}
+
+      {showShortfall && (
+        <ShortfallModal
+          entries={shortfallEntries}
+          rosterMonth={state.rosterMonth}
+          onChange={(idx, selected) =>
+            setShortfallEntries(prev => prev.map((e, i) => i === idx ? { ...e, selected } : e))
+          }
+          onConfirm={handleShortfallConfirm}
+          onClose={() => setShowShortfall(false)}
+        />
+      )}
 
       {showCarryoverReview && (
         <CarryoverReviewModal

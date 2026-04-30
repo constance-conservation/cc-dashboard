@@ -78,3 +78,17 @@ When given a multi-part task:
 
 - Run `npx tsc --noEmit` and `git diff` as **separate** Bash calls — never chain with `|`.
 - Errors in `.next/` are pre-existing and can be ignored; filter with `grep -v ".next/"`.
+
+---
+
+## Testing
+
+- Test runner: **Vitest** (`npm test` = single run, `npm run test:watch` = watch mode).
+- Test files live at `lib/**/*.test.ts` — co-located with the module they test.
+- Pure business logic must be extracted to `lib/` modules before testing. Never test React components or Supabase calls directly.
+- **Write or update tests whenever you:**
+  - Add a new pure function to `lib/`
+  - Fix a bug in existing logic (regression test first, then fix)
+  - Add a new feature to the rostering engine or any other `lib/` module
+- Run `npm test` after every change to a tested module. All tests must pass before committing.
+- Test file reference: `lib/rostering/engine.test.ts` — rostering auto-generate, computeMonthlyTarget, etc.

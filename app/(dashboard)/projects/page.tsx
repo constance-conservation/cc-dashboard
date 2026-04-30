@@ -10,12 +10,13 @@ import { Select } from '@/components/dashboard/Select'
 import { NumericInput } from '@/components/dashboard/NumericInput'
 import { InfoTooltip } from '@/components/dashboard/InfoTooltip'
 import { ConfirmDialog } from '@/components/dashboard/ConfirmDialog'
-import type { Project, Site, Activity, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus, ActivityType } from '@/lib/types'
+import type { Project, Site, Activity, Priority, WorkUnit, AllocationStrategy, CrewSizeType, ActivityStatus, ActivityType, WeatherConstraint, WeatherMetric } from '@/lib/types'
+import { DAY_HOURS } from '@/lib/rostering/engine'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function projectSites(state: ReturnType<typeof useCCState>, projectId: string): Site[] {
-  const ids = new Set(state.projectSiteLinks.filter(l => l.projectId === projectId).map(l => l.siteId))
+function projectZones(state: ReturnType<typeof useCCState>, projectId: string): Site[] {
+  const ids = new Set(state.projectZoneLinks.filter(l => l.projectId === projectId).map(l => l.siteId))
   return state.sites.filter(s => ids.has(s.id))
 }
 
@@ -47,11 +48,12 @@ const UNIT_OPTIONS = [
 const ALLOCATION_OPTIONS = [
   { value: 'even', label: 'Even spread' },
   { value: 'custom', label: 'Custom (per month)' },
+  { value: 'custom_date', label: 'Custom (specific dates)' },
 ]
 const CREW_TYPE_OPTIONS = [
   { value: 'fixed', label: 'Fixed' },
   { value: 'range', label: 'Range' },
-  { value: 'any', label: 'Any' },
+  { value: 'any', label: 'Flexible' },
 ]
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Active' },
@@ -61,47 +63,110 @@ const STATUS_OPTIONS = [
 
 // ── SkillsEditor ───────────────────────────────────────────────────────────────
 
-function SkillsEditor({ selected, allSkills, onChange, onAddSkill }: {
+function SkillsDropdown({ selected, allSkills, onChange, onAddSkill }: {
   selected: string[]
   allSkills: string[]
   onChange: (s: string[]) => void
-  onAddSkill: (s: string) => void
+  onAddSkill?: (s: string) => void
 }) {
-  const [newSkill, setNewSkill] = useState('')
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) { setOpen(false); setQuery('') }
+    }
+    if (open) {
+      document.addEventListener('mousedown', handleOutside)
+      setTimeout(() => searchRef.current?.focus(), 30)
+    }
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [open])
+
   const toggle = (s: string) => {
-    if (selected.includes(s)) onChange(selected.filter(x => x !== s))
-    else onChange([...selected, s])
+    onChange(selected.includes(s) ? selected.filter(x => x !== s) : [...selected, s])
   }
+
+  const q = query.trim().toLowerCase()
+  const filtered = q ? allSkills.filter(s => s.toLowerCase().includes(q)) : allSkills
+  const exactMatch = allSkills.some(s => s.toLowerCase() === q)
+  const showAdd = onAddSkill && q && !exactMatch
+
   const addNew = (e: React.FormEvent) => {
     e.preventDefault()
-    const s = newSkill.trim()
-    if (!s) return
-    onAddSkill(s)
+    const s = query.trim()
+    if (!s || exactMatch) return
+    onAddSkill?.(s)
     if (!selected.includes(s)) onChange([...selected, s])
-    setNewSkill('')
+    setQuery('')
   }
+
   return (
-    <div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-        {allSkills.map(s => (
-          <button key={s} type="button" onClick={() => toggle(s)}
-            className={`skill-chip toggleable${selected.includes(s) ? ' on' : ''}`}>
-            {selected.includes(s) && <Icon name="check" size={10} />} {s}
-          </button>
-        ))}
-      </div>
-      <form onSubmit={addNew} style={{ display: 'flex', gap: 6 }}>
-        <input className="input" placeholder="Add new skill…" value={newSkill}
-          onChange={e => setNewSkill(e.target.value)} style={{ flex: 1 }} />
-        <button type="submit" className="btn"><Icon name="plus" size={12} /> Add</button>
-      </form>
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button type="button" className="input" onClick={() => setOpen(v => !v)}
+        style={{ width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}>
+        <span style={{ color: selected.length > 0 ? 'var(--ink)' : 'var(--ink-3)' }}>
+          {selected.length > 0 ? `${selected.length} skill${selected.length !== 1 ? 's' : ''} selected` : 'Select skills…'}
+        </span>
+        <span style={{ transform: open ? 'rotate(-90deg)' : 'rotate(90deg)', transition: 'transform 0.15s', display: 'inline-flex' }}><Icon name="arrow" size={12} /></span>
+      </button>
+      {selected.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+          {selected.map(s => (
+            <button key={s} type="button" onClick={() => toggle(s)} className="skill-chip toggleable on">
+              <Icon name="check" size={10} /> {s}
+            </button>
+          ))}
+        </div>
+      )}
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200,
+          background: 'var(--bg-elev)', border: '1px solid var(--line)', borderRadius: 8,
+          boxShadow: '0 4px 16px oklch(0.18 0.015 150 / 0.12)', marginTop: 4, overflow: 'hidden' }}>
+          {/* Search / add at top */}
+          <form onSubmit={addNew} style={{ display: 'flex', gap: 6, padding: '8px 10px', borderBottom: '1px solid var(--line)' }}>
+            <input
+              ref={searchRef}
+              className="input"
+              placeholder={onAddSkill ? 'Search or add skill…' : 'Search skills…'}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onClick={e => e.stopPropagation()}
+              style={{ flex: 1, fontSize: 12 }}
+            />
+            {showAdd && (
+              <button type="submit" className="btn primary" style={{ fontSize: 12, padding: '4px 10px', flexShrink: 0 }}>
+                + Add
+              </button>
+            )}
+          </form>
+          {/* Skills list */}
+          {filtered.length === 0 ? (
+            <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+              {q ? 'No matching skills' : 'No skills defined'}
+            </div>
+          ) : (
+            <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+              {filtered.map(s => (
+                <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}
+                  onClick={e => e.stopPropagation()}>
+                  <input type="checkbox" checked={selected.includes(s)} onChange={() => toggle(s)} />
+                  {s}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
-// ── SiteSearchDropdown ─────────────────────────────────────────────────────────
+// ── ZoneSearchDropdown ─────────────────────────────────────────────────────────
 
-function SiteSearchDropdown({ linkedIds, allOrgSites, onLink, onCreateAndLink }: {
+function ZoneSearchDropdown({ linkedIds, allOrgSites, onLink, onCreateAndLink }: {
   linkedIds: Set<string>
   allOrgSites: Site[]
   onLink: (siteId: string) => void
@@ -130,7 +195,7 @@ function SiteSearchDropdown({ linkedIds, allOrgSites, onLink, onCreateAndLink }:
     <div ref={wrapRef} style={{ position: 'relative' }}>
       <input
         className="input"
-        placeholder={available.length === 0 ? 'All sites linked — type to add new…' : 'Search sites or add new…'}
+        placeholder={available.length === 0 ? 'All zones linked — type to add new…' : 'Search zones or add new…'}
         value={query}
         onChange={e => { setQuery(e.target.value); setOpen(true) }}
         onFocus={() => setOpen(true)}
@@ -176,33 +241,50 @@ function SiteSearchDropdown({ linkedIds, allOrgSites, onLink, onCreateAndLink }:
 
 // ── AllocationSpreadPanel ─────────────────────────────────────────────────────
 
-function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, customAllocs, onCustomAllocsChange }: {
+function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, customAllocs, onCustomAllocsChange, activityStart, activityEnd, effectiveCrew = 1 }: {
   strategy: AllocationStrategy
   months: string[]
   totalAllocation: number
   unit: WorkUnit
   customAllocs: Record<string, number>
   onCustomAllocsChange?: (allocs: Record<string, number>) => void
+  activityStart?: string
+  activityEnd?: string
+  effectiveCrew?: number
 }) {
   const monthLabel = (m: string) => {
     const [y, mo] = m.split('-')
     return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })
   }
 
-  if (months.length === 0) {
+  if (months.length === 0 && strategy !== 'custom_date') {
     return <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>Set start and end dates to see allocation spread</div>
   }
 
   if (strategy === 'even') {
     const total = Math.round(totalAllocation)
-    const base = total > 0 ? Math.floor(total / months.length) : 0
-    const remainder = total > 0 ? total % months.length : 0
-    const perMonthValues = months.map((_, i) => i < remainder ? base + 1 : base)
+    let perMonthValues: number[]
+    let remainderHours: number | null = null
+
+    if (unit === 'hours') {
+      const fullDays = Math.floor(total / DAY_HOURS)
+      const rem = total % DAY_HOURS
+      if (rem > 0) remainderHours = rem
+      const dBase = fullDays > 0 ? Math.floor(fullDays / months.length) : 0
+      const dExtras = fullDays > 0 ? fullDays % months.length : 0
+      perMonthValues = months.map((_, i) => (i < dExtras ? dBase + 1 : dBase) * DAY_HOURS)
+    } else {
+      const base = total > 0 ? Math.floor(total / months.length) : 0
+      const rem = total > 0 ? total % months.length : 0
+      perMonthValues = months.map((_, i) => i < rem ? base + 1 : base)
+    }
+
     const allSame = perMonthValues.every(v => v === perMonthValues[0])
+    const scheduledTotal = perMonthValues.reduce((s, v) => s + v, 0)
     return (
       <div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
-          {allSame ? `${perMonthValues[0]} ${unit} / month × ${months.length} months` : `${total} ${unit} over ${months.length} months`}
+          {allSame ? `${perMonthValues[0]} ${unit} / month × ${months.length} months` : `${scheduledTotal} ${unit} over ${months.length} months`}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 4 }}>
           {months.map((m, i) => (
@@ -214,9 +296,64 @@ function AllocationSpreadPanel({ strategy, months, totalAllocation, unit, custom
         </div>
         {total > 0 && (
           <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--line)', fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
-            Total: {total} {unit}
+            Total: {scheduledTotal} {unit}
           </div>
         )}
+        {remainderHours !== null && (
+          <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 6 }}>
+            {remainderHours}h remainder cannot be scheduled — only multiples of {DAY_HOURS}h (full days) are allocated.
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (strategy === 'custom_date') {
+    const selectedDates = Object.keys(customAllocs).filter(k => k.length === 10).sort()
+    const removeDate = (d: string) => {
+      const next = { ...customAllocs }
+      delete next[d]
+      onCustomAllocsChange?.(next)
+    }
+    const computedTotal = unit === 'hours'
+      ? selectedDates.length * effectiveCrew * DAY_HOURS
+      : selectedDates.length
+    const hoursPerDay = unit === 'hours' ? effectiveCrew * DAY_HOURS : null
+    return (
+      <div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8 }}>
+          Specific dates
+        </div>
+        {selectedDates.length === 0 && (
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic', marginBottom: 8 }}>No dates selected — pick dates below</div>
+        )}
+        {selectedDates.map(d => (
+          <div key={d} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink)', flex: 1 }}>{d}</span>
+            {hoursPerDay !== null && (
+              <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>{hoursPerDay}h</span>
+            )}
+            <button type="button" onClick={() => removeDate(d)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', fontSize: 14, lineHeight: 1, padding: '2px 4px' }}>×</button>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+          <input type="date" className="input" min={activityStart} max={activityEnd}
+            onChange={e => {
+              const d = e.target.value
+              if (d && !customAllocs[d]) {
+                onCustomAllocsChange?.({ ...customAllocs, [d]: 1 })
+              }
+              e.target.value = ''
+            }}
+            style={{ flex: 1 }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--line)', fontSize: 12 }}>
+          <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>Total selected</span>
+          <span style={{ fontWeight: 600, color: computedTotal === totalAllocation ? 'var(--accent)' : 'var(--warn)' }}>
+            {computedTotal} / {totalAllocation} {unit}
+          </span>
+        </div>
       </div>
     )
   }
@@ -383,22 +520,27 @@ function emptyActivity(projectId: string, defaultSiteId?: string, start = '', en
   }
 }
 
-function ActivityDrawer({ projectId, activityId, state, onClose }: {
+function ActivityDrawer({ projectId, activityId, state, onClose, onNavigate }: {
   projectId: string
   activityId: string | null
   state: ReturnType<typeof useCCState>
   onClose: () => void
+  onNavigate?: (id: string) => void
 }) {
   const existing = activityId ? state.activities.find(a => a.id === activityId) : null
   const project = state.projects.find(x => x.id === projectId)
-  const sites = projectSites(state, projectId)
-  const siteOptions = sites.map(s => ({ value: s.id, label: s.name }))
+  const projectActivities = state.activities.filter(a => a.projectId === projectId)
+  const currentIdx = activityId ? projectActivities.findIndex(a => a.id === activityId) : -1
+  const zones = projectZones(state, projectId)
+  const siteOptions = zones.map(s => ({ value: s.id, label: s.name }))
 
   const [form, setForm] = useState<ActivityFormState>(() =>
-    existing ? { ...existing } : emptyActivity(projectId, sites[0]?.id, project?.start ?? '', project?.end ?? '')
+    existing ? { ...existing } : emptyActivity(projectId, zones[0]?.id, project?.start ?? '', project?.end ?? '')
   )
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [showSpread, setShowSpread] = useState(existing?.allocationStrategy === 'custom')
+  const [showSpread, setShowSpread] = useState(
+    existing?.allocationStrategy === 'custom' || existing?.allocationStrategy === 'custom_date'
+  )
   const [pendingTypeName, setPendingTypeName] = useState<string | null>(null)
   const [customAllocs, setCustomAllocs] = useState<Record<string, number>>(() => {
     if (!activityId) return {}
@@ -408,7 +550,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
   })
 
   useEffect(() => {
-    if (form.allocationStrategy === 'custom') setShowSpread(true)
+    if (form.allocationStrategy === 'custom' || form.allocationStrategy === 'custom_date') setShowSpread(true)
   }, [form.allocationStrategy])
 
   useEffect(() => {
@@ -422,7 +564,6 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
 
   const canSave = !!(
     (form.name.trim() || form.activityTypeId) &&
-    form.siteId &&
     form.totalAllocation > 0
   )
 
@@ -433,6 +574,11 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
       if (form.allocationStrategy === 'custom') {
         const months = monthsBetween(form.start, form.end)
         const periods = months.map(m => ({ period: m, allocation: customAllocs[m] ?? 0 }))
+        await state.setActivityAllocations(existing.id, periods)
+      } else if (form.allocationStrategy === 'custom_date') {
+        const periods = Object.entries(customAllocs)
+          .filter(([k]) => k.length === 10)
+          .map(([period, allocation]) => ({ period, allocation }))
         await state.setActivityAllocations(existing.id, periods)
       }
     } else {
@@ -455,7 +601,26 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
       )}
       <Drawer
         title={existing ? existing.name : 'New activity'}
-        subtitle={existing ? 'Edit activity' : 'Add to project'}
+        subtitle={existing && onNavigate ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Edit activity</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <button className="iconbtn" disabled={currentIdx <= 0}
+                onClick={() => onNavigate(projectActivities[currentIdx - 1].id)}
+                style={{ opacity: currentIdx <= 0 ? 0.3 : 1 }}>
+                <Icon name="back" size={13} />
+              </button>
+              <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', minWidth: 40, textAlign: 'center' }}>
+                {currentIdx + 1} / {projectActivities.length}
+              </span>
+              <button className="iconbtn" disabled={currentIdx >= projectActivities.length - 1}
+                onClick={() => onNavigate(projectActivities[currentIdx + 1].id)}
+                style={{ opacity: currentIdx >= projectActivities.length - 1 ? 0.3 : 1, transform: 'rotate(180deg)' }}>
+                <Icon name="back" size={13} />
+              </button>
+            </div>
+          </div>
+        ) : existing ? 'Edit activity' : 'Add to project'}
         onClose={onClose}
         onSave={save}
         onDelete={existing ? () => setConfirmDelete(true) : undefined}
@@ -482,17 +647,48 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
             options={PRIORITY_OPTIONS} />
         </Field>
 
-        <Field label="Site">
-          {sites.length === 0 ? (
-            <div style={{ padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg-sunken)', fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>
-              No sites linked to this project — add sites in the Sites tab first
+        <Field label="Zone (optional)">
+          <Select value={form.siteId ?? ''}
+            onChange={v => setForm({ ...form, siteId: v || undefined })}
+            options={[
+              { value: '', label: 'No zone (project-wide)' },
+              ...siteOptions,
+            ]} />
+          {zones.length === 0 && (
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 4 }}>
+              No zones linked — add zones in the Zones tab to scope by zone
             </div>
-          ) : (
-            <Select value={form.siteId ?? ''}
-              onChange={v => setForm({ ...form, siteId: v || undefined })}
-              options={siteOptions} />
           )}
         </Field>
+
+        <Field label={
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            Crew type
+            <InfoTooltip text="Fixed: exact head count each day. Range: minimum to maximum. Flexible: no crew constraint — assign as available." />
+          </span>
+        }>
+          <Select value={form.crewSizeType}
+            onChange={v => setForm({ ...form, crewSizeType: v as CrewSizeType })}
+            options={CREW_TYPE_OPTIONS} />
+        </Field>
+
+        {form.crewSizeType === 'range' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <Field label="Target">
+              <NumericInput className="input" value={form.maxCrew ?? 0}
+                onChange={v => setForm({ ...form, maxCrew: v || undefined })} min={form.minCrew} />
+            </Field>
+            <Field label="Minimum">
+              <NumericInput className="input" value={form.minCrew}
+                onChange={v => setForm({ ...form, minCrew: v })} min={1} />
+            </Field>
+          </div>
+        ) : form.crewSizeType === 'fixed' ? (
+          <Field label="Crew size">
+            <NumericInput className="input" value={form.minCrew}
+              onChange={v => setForm({ ...form, minCrew: v })} min={1} />
+          </Field>
+        ) : null}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Field label="Work unit">
@@ -509,7 +705,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
         <Field label={
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             Allocation strategy
-            <InfoTooltip text="Even spread: total units distributed evenly across the date range. Custom: set a specific amount per calendar month." />
+            <InfoTooltip text="Even spread: units distributed evenly across months. Custom (per month): set amount per calendar month. Custom (specific dates): pick exact dates to schedule." />
           </span>
         }>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -531,6 +727,9 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
               unit={form.unit}
               customAllocs={customAllocs}
               onCustomAllocsChange={setCustomAllocs}
+              activityStart={form.start}
+              activityEnd={form.end}
+              effectiveCrew={form.crewSizeType === 'range' ? (form.maxCrew ?? form.minCrew) : form.crewSizeType === 'fixed' ? form.minCrew : 1}
             />
             {form.allocationStrategy === 'custom' && !existing && (
               <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 8 }}>
@@ -538,35 +737,6 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
               </div>
             )}
           </div>
-        )}
-
-        <Field label={
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            Crew type
-            <InfoTooltip text="Fixed: exact head count each day. Range: minimum to maximum. Any: no crew constraint — assign as available." />
-          </span>
-        }>
-          <Select value={form.crewSizeType}
-            onChange={v => setForm({ ...form, crewSizeType: v as CrewSizeType })}
-            options={CREW_TYPE_OPTIONS} />
-        </Field>
-
-        {form.crewSizeType === 'range' ? (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <Field label="Target">
-              <NumericInput className="input" value={form.maxCrew ?? 0}
-                onChange={v => setForm({ ...form, maxCrew: v || undefined })} min={form.minCrew} />
-            </Field>
-            <Field label="Minimum">
-              <NumericInput className="input" value={form.minCrew}
-                onChange={v => setForm({ ...form, minCrew: v })} min={1} />
-            </Field>
-          </div>
-        ) : (
-          <Field label="Crew size">
-            <NumericInput className="input" value={form.minCrew}
-              onChange={v => setForm({ ...form, minCrew: v })} min={1} />
-          </Field>
         )}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -590,7 +760,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
         </div>
 
         <Field label="Required skills">
-          <SkillsEditor selected={form.skills} allSkills={state.skills}
+          <SkillsDropdown selected={form.skills} allSkills={state.skills}
             onChange={skills => setForm({ ...form, skills })}
             onAddSkill={state.addSkill} />
         </Field>
@@ -607,7 +777,7 @@ function ActivityDrawer({ projectId, activityId, state, onClose }: {
 
 // ── ProjectDrawer ──────────────────────────────────────────────────────────────
 
-type DrawerTab = 'details' | 'sites' | 'activities'
+type DrawerTab = 'details' | 'zones' | 'activities'
 
 function ProjectDrawer({ projectId, state, onClose }: {
   projectId: string
@@ -618,12 +788,13 @@ function ProjectDrawer({ projectId, state, onClose }: {
   const [edit, setEdit] = useState<Project>({ ...p })
   const [tab, setTab] = useState<DrawerTab>('details')
   const [confirmDeleteProject, setConfirmDeleteProject] = useState(false)
-  const [confirmDeleteSite, setConfirmDeleteSite] = useState<string | null>(null)
+  const [confirmDeleteZone, setConfirmDeleteZone] = useState<string | null>(null)
   const [editActivityId, setEditActivityId] = useState<string | null | 'new'>(null)
-  const [editSiteId, setEditSiteId] = useState<string | null>(null)
+  const [editZoneId, setEditZoneId] = useState<string | null>(null)
+  const [showLocationPicker, setShowLocationPicker] = useState(false)
 
-  const sites = projectSites(state, projectId)
-  const linkedIds = new Set(sites.map(s => s.id))
+  const zones = projectZones(state, projectId)
+  const linkedIds = new Set(zones.map(s => s.id))
   const activities = state.activities.filter(a => a.projectId === projectId)
 
   const saveDetails = () => { state.updateProject(p.id, { ...edit, client: p.client }); onClose() }
@@ -638,6 +809,14 @@ function ProjectDrawer({ projectId, state, onClose }: {
 
   return (
     <>
+      {showLocationPicker && (
+        <LocationPickerModal
+          initialLat={edit.lat}
+          initialLng={edit.lng}
+          onConfirm={(lat, lng) => { setEdit({ ...edit, lat, lng }); setShowLocationPicker(false) }}
+          onClose={() => setShowLocationPicker(false)}
+        />
+      )}
       {confirmDeleteProject && (
         <ConfirmDialog
           title={`Delete "${p.name}"?`}
@@ -648,14 +827,14 @@ function ProjectDrawer({ projectId, state, onClose }: {
           onCancel={() => setConfirmDeleteProject(false)}
         />
       )}
-      {confirmDeleteSite && (
+      {confirmDeleteZone && (
         <ConfirmDialog
-          title="Remove site from project?"
-          message="This will unlink the site from this project. Activities assigned to this site will become project-wide."
-          confirmLabel="Remove site"
+          title="Remove zone from project?"
+          message="This will unlink the zone from this project. Activities assigned to this zone will become project-wide."
+          confirmLabel="Remove zone"
           danger
-          onConfirm={() => { state.unlinkSite(projectId, confirmDeleteSite); setConfirmDeleteSite(null) }}
-          onCancel={() => setConfirmDeleteSite(null)}
+          onConfirm={() => { state.unlinkSite(projectId, confirmDeleteZone); setConfirmDeleteZone(null) }}
+          onCancel={() => setConfirmDeleteZone(null)}
         />
       )}
 
@@ -667,12 +846,13 @@ function ProjectDrawer({ projectId, state, onClose }: {
         onDelete={tab === 'details' ? () => setConfirmDeleteProject(true) : undefined}
         onArchive={tab === 'details' && !p.archived ? () => { state.archiveProject(p.id); onClose() } : undefined}
         onRestore={tab === 'details' && p.archived ? () => { state.restoreProject(p.id); onClose() } : undefined}
+        hideOverlay={editActivityId !== null}
       >
         {/* Tab bar */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 18 }}>
           <button style={tabStyle('details')} onClick={() => setTab('details')}>Details</button>
-          <button style={tabStyle('sites')} onClick={() => setTab('sites')}>
-            Sites{sites.length > 0 ? ` (${sites.length})` : ''}
+          <button style={tabStyle('zones')} onClick={() => setTab('zones')}>
+            Zones{zones.length > 0 ? ` (${zones.length})` : ''}
           </button>
           <button style={tabStyle('activities')} onClick={() => setTab('activities')}>
             Activities{activities.length > 0 ? ` (${activities.length})` : ''}
@@ -717,24 +897,45 @@ function ProjectDrawer({ projectId, state, onClose }: {
                   onChange={v => setEdit({ ...edit, contractValue: v })} min={0} />
               </Field>
             </div>
+            <Field label="Location">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {edit.lat != null && edit.lng != null ? (
+                  <span style={{ fontSize: 12, color: 'var(--ink-2)', fontFamily: 'var(--font-mono)' }}>
+                    {edit.lat.toFixed(5)}, {edit.lng.toFixed(5)}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Not set</span>
+                )}
+                <button type="button" className="btn" style={{ fontSize: 12, padding: '4px 10px' }}
+                  onClick={() => setShowLocationPicker(true)}>
+                  <Icon name="map" size={12} /> {edit.lat != null ? 'Edit' : 'Set location'}
+                </button>
+                {edit.lat != null && (
+                  <button type="button" className="iconbtn" style={{ color: 'var(--danger)' }}
+                    onClick={() => setEdit({ ...edit, lat: undefined, lng: undefined })}>
+                    <Icon name="close" size={12} />
+                  </button>
+                )}
+              </div>
+            </Field>
           </>
         )}
 
-        {/* Sites tab */}
-        {tab === 'sites' && (
+        {/* Zones tab */}
+        {tab === 'zones' && (
           <>
-            {sites.length === 0 && (
+            {zones.length === 0 && (
               <div style={{ color: 'var(--ink-3)', fontSize: 12, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em', paddingBottom: 14 }}>
-                No sites yet
+                No zones yet
               </div>
             )}
-            {sites.map(s => (
+            {zones.map(s => (
               <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
-                {editSiteId === s.id ? (
+                {editZoneId === s.id ? (
                   <>
                     <input className="input" defaultValue={s.name} style={{ flex: 1 }}
                       onBlur={e => state.updateSite(s.id, { name: e.target.value })} />
-                    <button className="btn" onClick={() => setEditSiteId(null)}>Done</button>
+                    <button className="btn" onClick={() => setEditZoneId(null)}>Done</button>
                   </>
                 ) : (
                   <>
@@ -744,10 +945,10 @@ function ProjectDrawer({ projectId, state, onClose }: {
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)' }}>
                       {activities.filter(a => a.siteId === s.id).length} activities
                     </span>
-                    <button className="iconbtn" onClick={() => setEditSiteId(s.id)}>
+                    <button className="iconbtn" onClick={() => setEditZoneId(s.id)}>
                       <Icon name="edit" size={12} />
                     </button>
-                    <button className="iconbtn" onClick={() => setConfirmDeleteSite(s.id)}
+                    <button className="iconbtn" onClick={() => setConfirmDeleteZone(s.id)}
                       style={{ color: 'var(--danger)' }}>
                       <Icon name="trash" size={12} />
                     </button>
@@ -757,9 +958,9 @@ function ProjectDrawer({ projectId, state, onClose }: {
             ))}
             <div style={{ marginTop: 16 }}>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 6 }}>
-                Add site
+                Add zone
               </div>
-              <SiteSearchDropdown
+              <ZoneSearchDropdown
                 linkedIds={linkedIds}
                 allOrgSites={state.sites}
                 onLink={siteId => state.linkSite(projectId, siteId)}
@@ -783,10 +984,10 @@ function ProjectDrawer({ projectId, state, onClose }: {
               </div>
             )}
 
-            {/* Group activities by site, then project-wide (includes orphaned siteIds) */}
+            {/* Group activities by zone, then project-wide (includes orphaned siteIds) */}
             {(() => {
-              const linkedSiteIds = new Set(sites.map(s => s.id))
-              return [...sites, null].map(site => {
+              const linkedSiteIds = new Set(zones.map(s => s.id))
+              return [...zones, null].map(site => {
                 const group = site
                   ? activities.filter(a => a.siteId === site.id)
                   : activities.filter(a => !a.siteId || !linkedSiteIds.has(a.siteId))
@@ -795,7 +996,7 @@ function ProjectDrawer({ projectId, state, onClose }: {
                 return (
                   <div key={site?.id ?? 'project-wide'} style={{ marginBottom: 18 }}>
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid var(--line)' }}>
-                      {site ? site.name : (sites.length > 0 ? 'Project-wide' : 'Activities')}
+                      {site ? site.name : (zones.length > 0 ? 'Project-wide' : 'Activities')}
                     </div>
                     {group.map(a => (
                       <div key={a.id}
@@ -833,10 +1034,12 @@ function ProjectDrawer({ projectId, state, onClose }: {
       </Drawer>
       {editActivityId !== null && (
         <ActivityDrawer
+          key={editActivityId}
           projectId={projectId}
           activityId={editActivityId === 'new' ? null : editActivityId}
           state={state}
           onClose={() => setEditActivityId(null)}
+          onNavigate={id => setEditActivityId(id)}
         />
       )}
     </>
@@ -871,7 +1074,9 @@ function AddProjectModal({ state, onClose }: {
   const [p, setP] = useState<Omit<Project, 'id'>>({
     name: '', client: '', start: '', end: '',
     priority: 'medium', contractValue: 0, projectNumber: undefined,
+    lat: undefined as number | undefined, lng: undefined as number | undefined,
   })
+  const [showLocationPicker, setShowLocationPicker] = useState(false)
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [clientOpen, setClientOpen] = useState(false)
   const [selectedSiteIds, setSelectedSiteIds] = useState<string[]>([])
@@ -934,10 +1139,10 @@ function AddProjectModal({ state, onClose }: {
     if (!p.start) { setSaveError('Start date is required.'); return }
     if (!p.end) { setSaveError('End date is required.'); return }
     if (p.contractValue <= 0) { setSaveError('Contract value must be greater than $0.'); return }
-    if (selectedSiteIds.length + pendingSiteNames.length === 0) { setSaveError('At least one site is required.'); return }
+    if (selectedSiteIds.length + pendingSiteNames.length === 0) { setSaveError('At least one zone is required.'); return }
     for (const act of pendingActivities) {
-      if (!act.name.trim() || !act.siteKey || act.totalAllocation <= 0) {
-        setSaveError('All activities must have a name, site, and allocation greater than 0.')
+      if (!act.name.trim() || act.totalAllocation <= 0) {
+        setSaveError('All activities must have a name and allocation greater than 0.')
         return
       }
     }
@@ -989,6 +1194,11 @@ function AddProjectModal({ state, onClose }: {
       if (activityId && act.allocationStrategy === 'custom') {
         const months = monthsBetween(p.start, p.end)
         const periods = months.map(m => ({ period: m, allocation: act.customAllocs[m] ?? 0 }))
+        await state.setActivityAllocations(activityId, periods)
+      } else if (activityId && act.allocationStrategy === 'custom_date') {
+        const periods = Object.entries(act.customAllocs)
+          .filter(([k]) => k.length === 10)
+          .map(([period, allocation]) => ({ period, allocation }))
         await state.setActivityAllocations(activityId, periods)
       }
     }
@@ -1057,7 +1267,7 @@ function AddProjectModal({ state, onClose }: {
 
       {/* Site picker — only shown when a client is selected */}
       {selectedClientId && (
-        <Field label="Sites (select existing or add new)">
+        <Field label="Zones (select existing or add new)">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {clientSites.map(s => (
               <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
@@ -1081,11 +1291,11 @@ function AddProjectModal({ state, onClose }: {
             ))}
             {clientSites.length === 0 && pendingSiteNames.length === 0 && (
               <div style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>
-                No sites for this client yet — add one below
+                No zones for this client yet — add one below
               </div>
             )}
             <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-              <input className="input" placeholder="Add new site name…"
+              <input className="input" placeholder="Add new zone name…"
                 value={newSiteInput} onChange={e => setNewSiteInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addPendingSite() } }}
                 style={{ flex: 1 }} />
@@ -1120,6 +1330,37 @@ function AddProjectModal({ state, onClose }: {
             onChange={v => setP({ ...p, contractValue: v })} min={0} />
         </Field>
       </div>
+
+      <Field label="Location">
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {p.lat != null && p.lng != null ? (
+            <span style={{ fontSize: 12, color: 'var(--ink-2)', fontFamily: 'var(--font-mono)' }}>
+              {p.lat.toFixed(5)}, {p.lng.toFixed(5)}
+            </span>
+          ) : (
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Not set</span>
+          )}
+          <button type="button" className="btn" style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={() => setShowLocationPicker(true)}>
+            <Icon name="map" size={12} /> {p.lat != null ? 'Edit' : 'Set location'}
+          </button>
+          {p.lat != null && (
+            <button type="button" className="iconbtn" style={{ color: 'var(--danger)' }}
+              onClick={() => setP({ ...p, lat: undefined, lng: undefined })}>
+              <Icon name="close" size={12} />
+            </button>
+          )}
+        </div>
+      </Field>
+
+      {showLocationPicker && (
+        <LocationPickerModal
+          initialLat={p.lat}
+          initialLng={p.lng}
+          onConfirm={(lat, lng) => { setP({ ...p, lat, lng }); setShowLocationPicker(false) }}
+          onClose={() => setShowLocationPicker(false)}
+        />
+      )}
 
       {/* Activities section */}
       <div style={{ borderTop: '1px solid var(--line)', paddingTop: 16, marginTop: 6 }}>
@@ -1172,12 +1413,12 @@ function AddProjectModal({ state, onClose }: {
                 </Field>
                 {(() => {
                   const siteOpts = [
-                    { value: '', label: 'Select site…' },
+                    { value: '', label: 'No zone (project-wide)' },
                     ...selectedSiteIds.map(id => ({ value: id, label: state.sites.find(s => s.id === id)?.name ?? id })),
                     ...pendingSiteNames.map((name, i) => ({ value: `pending:${i}`, label: `${name} (new)` })),
                   ]
                   return (
-                    <Field label="Site">
+                    <Field label="Zone (optional)">
                       <Select value={a.siteKey ?? ''}
                         onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, siteKey: v } : x))}
                         options={siteOpts} />
@@ -1189,6 +1430,28 @@ function AddProjectModal({ state, onClose }: {
                     onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, priority: v as Priority } : x))}
                     options={PRIORITY_OPTIONS} />
                 </Field>
+                <Field label="Crew type">
+                  <Select value={a.crewSizeType}
+                    onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, crewSizeType: v as CrewSizeType } : x))}
+                    options={CREW_TYPE_OPTIONS} />
+                </Field>
+                {a.crewSizeType === 'range' ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <Field label="Target">
+                      <NumericInput className="input" value={a.maxCrew ?? 0}
+                        onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, maxCrew: v || undefined } : x))} min={a.minCrew} />
+                    </Field>
+                    <Field label="Minimum">
+                      <NumericInput className="input" value={a.minCrew}
+                        onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, minCrew: v } : x))} min={1} />
+                    </Field>
+                  </div>
+                ) : a.crewSizeType === 'fixed' ? (
+                  <Field label="Crew size">
+                    <NumericInput className="input" value={a.minCrew}
+                      onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, minCrew: v } : x))} min={1} />
+                  </Field>
+                ) : null}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <Field label="Work unit">
                     <Select value={a.unit}
@@ -1206,7 +1469,7 @@ function AddProjectModal({ state, onClose }: {
                       <Select value={a.allocationStrategy}
                         onChange={v => {
                           setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, allocationStrategy: v as AllocationStrategy } : x))
-                          if (v === 'custom') setShowExpandedSpread(true)
+                          if (v === 'custom' || v === 'custom_date') setShowExpandedSpread(true)
                         }}
                         options={ALLOCATION_OPTIONS} />
                     </div>
@@ -1222,12 +1485,16 @@ function AddProjectModal({ state, onClose }: {
                       unit={a.unit}
                       customAllocs={a.customAllocs ?? {}}
                       onCustomAllocsChange={allocs => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, customAllocs: allocs } : x))}
+                      activityStart={p.start}
+                      activityEnd={p.end}
+                      effectiveCrew={a.crewSizeType === 'range' ? (a.maxCrew ?? a.minCrew) : a.crewSizeType === 'fixed' ? a.minCrew : 1}
                     />
                   </div>
                 )}
-                <Field label="Crew size">
-                  <NumericInput className="input" value={a.minCrew}
-                    onChange={v => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, minCrew: v } : x))} min={1} />
+                <Field label="Required skills">
+                  <SkillsDropdown selected={a.skills ?? []} allSkills={state.skills}
+                    onChange={skills => setPendingActivities(prev => prev.map((x, i) => i === idx ? { ...x, skills } : x))}
+                    onAddSkill={state.addSkill} />
                 </Field>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <Field label="Charge-out rate ($)">
@@ -1277,7 +1544,7 @@ function AddProjectModal({ state, onClose }: {
             </Field>
             {(() => {
               const siteOpts = [
-                { value: '', label: 'Select site…' },
+                { value: '', label: 'No zone (project-wide)' },
                 ...selectedSiteIds.map(id => ({
                   value: id,
                   label: state.sites.find(s => s.id === id)?.name ?? id,
@@ -1288,7 +1555,7 @@ function AddProjectModal({ state, onClose }: {
                 })),
               ]
               return (
-                <Field label="Site">
+                <Field label="Zone (optional)">
                   <Select value={activityForm.siteKey ?? ''}
                     onChange={v => setActivityForm({ ...activityForm, siteKey: v })}
                     options={siteOpts} />
@@ -1300,6 +1567,28 @@ function AddProjectModal({ state, onClose }: {
                 onChange={v => setActivityForm({ ...activityForm, priority: v as Priority })}
                 options={PRIORITY_OPTIONS} />
             </Field>
+            <Field label="Crew type">
+              <Select value={activityForm.crewSizeType}
+                onChange={v => setActivityForm({ ...activityForm, crewSizeType: v as CrewSizeType })}
+                options={CREW_TYPE_OPTIONS} />
+            </Field>
+            {activityForm.crewSizeType === 'range' ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <Field label="Target">
+                  <NumericInput className="input" value={activityForm.maxCrew ?? 0}
+                    onChange={v => setActivityForm({ ...activityForm, maxCrew: v || undefined })} min={activityForm.minCrew} />
+                </Field>
+                <Field label="Minimum">
+                  <NumericInput className="input" value={activityForm.minCrew}
+                    onChange={v => setActivityForm({ ...activityForm, minCrew: v })} min={1} />
+                </Field>
+              </div>
+            ) : activityForm.crewSizeType === 'fixed' ? (
+              <Field label="Crew size">
+                <NumericInput className="input" value={activityForm.minCrew}
+                  onChange={v => setActivityForm({ ...activityForm, minCrew: v })} min={1} />
+              </Field>
+            ) : null}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <Field label="Work unit">
                 <Select value={activityForm.unit}
@@ -1317,7 +1606,7 @@ function AddProjectModal({ state, onClose }: {
                   <Select value={activityForm.allocationStrategy}
                     onChange={v => {
                       setActivityForm({ ...activityForm, allocationStrategy: v as AllocationStrategy })
-                      if (v === 'custom') setShowNewActivitySpread(true)
+                      if (v === 'custom' || v === 'custom_date') setShowNewActivitySpread(true)
                     }}
                     options={ALLOCATION_OPTIONS} />
                 </div>
@@ -1333,12 +1622,16 @@ function AddProjectModal({ state, onClose }: {
                   unit={activityForm.unit}
                   customAllocs={activityForm.customAllocs}
                   onCustomAllocsChange={allocs => setActivityForm({ ...activityForm, customAllocs: allocs })}
+                  activityStart={p.start}
+                  activityEnd={p.end}
+                  effectiveCrew={activityForm.crewSizeType === 'range' ? (activityForm.maxCrew ?? activityForm.minCrew) : activityForm.crewSizeType === 'fixed' ? activityForm.minCrew : 1}
                 />
               </div>
             )}
-            <Field label="Crew size">
-              <NumericInput className="input" value={activityForm.minCrew}
-                onChange={v => setActivityForm({ ...activityForm, minCrew: v })} min={1} />
+            <Field label="Required skills">
+              <SkillsDropdown selected={activityForm.skills} allSkills={state.skills}
+                onChange={skills => setActivityForm({ ...activityForm, skills })}
+                onAddSkill={state.addSkill} />
             </Field>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <Field label="Charge-out rate ($)">
@@ -1366,9 +1659,9 @@ function AddProjectModal({ state, onClose }: {
             </Field>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn primary" type="button"
-                disabled={!activityForm.name.trim() || !activityForm.siteKey || activityForm.totalAllocation <= 0}
+                disabled={!activityForm.name.trim() || activityForm.totalAllocation <= 0}
                 onClick={() => {
-                  if (!activityForm.name.trim() || !activityForm.siteKey || activityForm.totalAllocation <= 0) return
+                  if (!activityForm.name.trim() || activityForm.totalAllocation <= 0) return
                   setPendingActivities(prev => [...prev, { ...activityForm }])
                   setActivityForm({ name: '', activityTypeId: undefined, siteKey: '', priority: 'medium', unit: 'days', allocationStrategy: 'even', totalAllocation: 0, customAllocs: {}, crewSizeType: 'fixed', minCrew: 1, maxCrew: undefined, chargeOutRate: 0, overtimeFlag: false, overtimeRate: 1.5, skills: [], notes: undefined })
                   setShowActivityForm(false)
@@ -1381,13 +1674,12 @@ function AddProjectModal({ state, onClose }: {
         ) : (
           <>
             <button className="btn" type="button"
-              disabled={selectedSiteIds.length + pendingSiteNames.length === 0 || !p.start || !p.end}
+              disabled={!p.start || !p.end}
               onClick={() => setShowActivityForm(true)}>
               <Icon name="plus" size={14} /> Add activity
             </button>
-            {selectedClientId && (selectedSiteIds.length + pendingSiteNames.length === 0
-              ? <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>Add at least one site above before adding activities</div>
-              : (!p.start || !p.end) && <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>Set project start and end dates before adding activities</div>
+            {selectedClientId && (!p.start || !p.end) && (
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontStyle: 'italic', marginTop: 6 }}>Set project start and end dates before adding activities</div>
             )}
           </>
         )}
@@ -1406,6 +1698,106 @@ function AddProjectModal({ state, onClose }: {
   )
 }
 
+// ── LocationPickerModal ────────────────────────────────────────────────────────
+
+function LocationPickerModal({ initialLat, initialLng, onConfirm, onClose }: {
+  initialLat?: number
+  initialLng?: number
+  onConfirm: (lat: number, lng: number) => void
+  onClose: () => void
+}) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapRef = useRef<HTMLDivElement>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapInstance = useRef<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markerRef = useRef<any>(null)
+  const [leafletReady, setLeafletReady] = useState(typeof window !== 'undefined' && !!(window as any).L)
+  const [picked, setPicked] = useState<{ lat: number; lng: number } | undefined>(
+    initialLat != null && initialLng != null ? { lat: initialLat, lng: initialLng } : undefined
+  )
+
+  useEffect(() => {
+    if ((window as any).L) { setLeafletReady(true); return }
+    const css = document.createElement('link')
+    css.rel = 'stylesheet'
+    css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+    css.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY='
+    css.crossOrigin = ''
+    document.head.appendChild(css)
+    const s = document.createElement('script')
+    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+    s.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo='
+    s.crossOrigin = ''
+    s.onload = () => setLeafletReady(true)
+    document.head.appendChild(s)
+  }, [])
+
+  useEffect(() => {
+    if (!leafletReady || !mapRef.current || mapInstance.current) return
+    const L = (window as any).L
+    const center: [number, number] = initialLat != null && initialLng != null
+      ? [initialLat, initialLng]
+      : [-33.87, 151.21]
+    const map = L.map(mapRef.current, { zoomControl: true, attributionControl: false }).setView(center, initialLat != null ? 12 : 8)
+    mapInstance.current = map
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(map)
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, opacity: 0.7 }).addTo(map)
+
+    if (initialLat != null && initialLng != null) {
+      markerRef.current = L.marker([initialLat, initialLng]).addTo(map)
+    }
+
+    map.on('click', (e: any) => {
+      const { lat, lng } = e.latlng
+      if (markerRef.current) { markerRef.current.remove() }
+      markerRef.current = L.marker([lat, lng]).addTo(map)
+      setPicked({ lat, lng })
+    })
+  }, [leafletReady])
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1100,
+        background: 'oklch(0.1 0.01 150 / 0.6)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <div style={{ width: 580, maxWidth: '95vw', background: 'var(--bg-elev)', borderRadius: 14, overflow: 'hidden', boxShadow: '0 12px 48px rgba(0,0,0,0.45)', border: '1px solid var(--line)' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--line)' }}>
+          <div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600 }}>Set project location</div>
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>Click on the map to pin the project site</div>
+          </div>
+          <button className="iconbtn" onClick={onClose}><Icon name="close" size={16} /></button>
+        </div>
+        <div style={{ position: 'relative', height: 300, margin: '12px 12px 0', borderRadius: 8, overflow: 'hidden' }}>
+          <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+          {!leafletReady && (
+            <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Loading map…
+            </div>
+          )}
+        </div>
+        <div style={{ padding: '12px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+          <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: picked ? 'var(--ink-2)' : 'var(--ink-3)' }}>
+            {picked ? `${picked.lat.toFixed(5)}, ${picked.lng.toFixed(5)}` : 'No location selected'}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={onClose}>Cancel</button>
+            <button className="btn primary" disabled={!picked} onClick={() => picked && onConfirm(picked.lat, picked.lng)}>
+              Confirm location
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── ActivityTypesModal ─────────────────────────────────────────────────────────
 
 function ActivityTypesModal({ state, onClose }: {
@@ -1417,6 +1809,8 @@ function ActivityTypesModal({ state, onClose }: {
   const [editId, setEditId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editDesc, setEditDesc] = useState('')
+  const [editEquipment, setEditEquipment] = useState<string[]>([])
+  const [editWeather, setEditWeather] = useState<WeatherConstraint[]>([])
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   const addNew = (e: React.FormEvent) => {
@@ -1427,15 +1821,22 @@ function ActivityTypesModal({ state, onClose }: {
     setNewDesc('')
   }
 
-  const startEdit = (t: { id: string; name: string; description?: string }) => {
+  const startEdit = (t: ActivityType) => {
     setEditId(t.id)
     setEditName(t.name)
     setEditDesc(t.description ?? '')
+    setEditEquipment(t.requiredEquipmentIds ?? [])
+    setEditWeather(t.weatherConstraints ?? [])
   }
 
   const commitEdit = () => {
     if (!editId || !editName.trim()) return
-    state.updateActivityType(editId, { name: editName.trim(), description: editDesc.trim() || undefined })
+    state.updateActivityType(editId, {
+      name: editName.trim(),
+      description: editDesc.trim() || undefined,
+      requiredEquipmentIds: editEquipment,
+      weatherConstraints: editWeather,
+    })
     setEditId(null)
   }
 
@@ -1479,7 +1880,7 @@ function ActivityTypesModal({ state, onClose }: {
                 <input className="input" placeholder="Brief description…" value={newDesc}
                   onChange={e => setNewDesc(e.target.value)} />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <button type="submit" className="btn primary" style={{ flexShrink: 0 }}>
                   <Icon name="plus" size={12} /> Add
                 </button>
@@ -1503,7 +1904,62 @@ function ActivityTypesModal({ state, onClose }: {
                         <input className="input" value={editDesc} onChange={e => setEditDesc(e.target.value)}
                           placeholder="Description…"
                           onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditId(null) }} />
-                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-start' }}>
+                        {/* Equipment section */}
+                        <div style={{ marginTop: 6 }}>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 6 }}>
+                            Required equipment
+                          </div>
+                          {state.vehicles.length === 0 ? (
+                            <div style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>No vehicles registered</div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {state.vehicles.map(v => (
+                                <label key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                                  <input type="checkbox"
+                                    checked={editEquipment.includes(v.id)}
+                                    onChange={() => setEditEquipment(prev =>
+                                      prev.includes(v.id) ? prev.filter(id => id !== v.id) : [...prev, v.id]
+                                    )} />
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{v.registration}</span>
+                                  <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{v.make} {v.model}</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {/* Weather constraints section */}
+                        <div style={{ marginTop: 6 }}>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)', marginBottom: 6 }}>
+                            Weather constraints
+                          </div>
+                          {editWeather.map((wc, i) => (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                              <select className="input" style={{ flex: 1, fontSize: 12 }}
+                                value={wc.metric}
+                                onChange={e => setEditWeather(prev => prev.map((x, j) => j === i ? { ...x, metric: e.target.value as WeatherMetric } : x))}>
+                                <option value="precipitation_mm">Precipitation (mm)</option>
+                                <option value="wind_speed_kmh">Wind speed (km/h)</option>
+                                <option value="temp_max_c">Max temp (°C)</option>
+                                <option value="temp_min_c">Min temp (°C)</option>
+                              </select>
+                              <NumericInput className="input" style={{ width: 72 }} placeholder="Max"
+                                value={wc.max ?? 0}
+                                onChange={v => setEditWeather(prev => prev.map((x, j) => j === i ? { ...x, max: v || undefined } : x))} />
+                              <NumericInput className="input" style={{ width: 72 }} placeholder="Min"
+                                value={wc.min ?? 0}
+                                onChange={v => setEditWeather(prev => prev.map((x, j) => j === i ? { ...x, min: v || undefined } : x))} />
+                              <button type="button" className="iconbtn" style={{ color: 'var(--danger)' }}
+                                onClick={() => setEditWeather(prev => prev.filter((_, j) => j !== i))}>
+                                <Icon name="trash" size={12} />
+                              </button>
+                            </div>
+                          ))}
+                          <button type="button" className="btn" style={{ fontSize: 12, padding: '4px 10px' }}
+                            onClick={() => setEditWeather(prev => [...prev, { metric: 'precipitation_mm' }])}>
+                            + Add constraint
+                          </button>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 8 }}>
                           <button className="btn primary" onClick={commitEdit} style={{ fontSize: 12, padding: '5px 10px' }}>Save</button>
                           <button className="btn" onClick={() => setEditId(null)} style={{ fontSize: 12, padding: '5px 10px' }}>Cancel</button>
                         </div>
@@ -1513,6 +1969,20 @@ function ActivityTypesModal({ state, onClose }: {
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: 13, fontWeight: 500 }}>{t.name}</div>
                           {t.description && <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 1 }}>{t.description}</div>}
+                          {((t.requiredEquipmentIds?.length ?? 0) > 0 || (t.weatherConstraints?.length ?? 0) > 0) && (
+                            <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                              {(t.requiredEquipmentIds?.length ?? 0) > 0 && (
+                                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'var(--bg-card)', color: 'var(--ink-2)', border: '1px solid var(--line)' }}>
+                                  {t.requiredEquipmentIds!.length} vehicle{t.requiredEquipmentIds!.length !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                              {(t.weatherConstraints?.length ?? 0) > 0 && (
+                                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'var(--bg-card)', color: 'var(--ink-2)', border: '1px solid var(--line)' }}>
+                                  {t.weatherConstraints!.length} constraint{t.weatherConstraints!.length !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <button className="iconbtn" onClick={() => startEdit(t)} style={{ color: 'var(--ink-3)' }}>
                           <Icon name="edit" size={13} />
@@ -1597,11 +2067,11 @@ export default function ProjectsPage() {
 
         <table className="table">
           <thead><tr>
-            <th>Project</th><th>Client</th><th>Contract value</th><th>Dates</th><th>Sites</th><th>Priority</th>
+            <th>Project</th><th>Client</th><th>Contract value</th><th>Dates</th><th>Zones</th><th>Priority</th>
           </tr></thead>
           <tbody>
             {visible.map(p => {
-              const ss = projectSites(state, p.id)
+              const ss = projectZones(state, p.id)
               return (
                 <tr key={p.id} onClick={() => setSelected(p.id)} style={{ cursor: 'pointer' }}>
                   <td style={{ fontWeight: 500 }}>
