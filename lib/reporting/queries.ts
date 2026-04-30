@@ -1,0 +1,1002 @@
+import { createClient } from '@/lib/supabase/server'
+import type {
+  LandingDashboardData,
+  StatusCounts,
+  LabelValue,
+  ClientsListData,
+  ClientSummary,
+  ClientDetailData,
+  SiteSummary,
+  SiteDetailData,
+  ZoneRow,
+  ReportsListData,
+  ReportListItem,
+  ReportStatus,
+  ReportScope,
+  ScopeContext,
+  ReportDetail,
+  StaffData,
+  StaffRosterRow,
+  ChemicalsData,
+  ChemicalApplicationRecordRow,
+  ChemicalLookupCard,
+  SpeciesData,
+  SpeciesLookupCard,
+  InspectionRow,
+  InspectionsListData,
+  InspectionTemplateType,
+  ProcessingStatus,
+  SiteWithStats,
+  SitesGlobalData,
+  PipelineHealthData,
+  PipelineIssueRow,
+  SyncState,
+} from './types'
+
+const TOP_N = 8
+
+function countBy<T extends Record<string, unknown>>(rows: T[], key: keyof T): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const r of rows) {
+    const k = (r[key] as string | null) ?? 'unknown'
+    out[k] = (out[k] ?? 0) + 1
+  }
+  return out
+}
+
+function topN(counts: Record<string, number>, n = TOP_N): LabelValue[] {
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n)
+    .map(([label, value]) => ({ label, value }))
+}
+
+export async function getLandingDashboardData(): Promise<LandingDashboardData> {
+  const supabase = await createClient()
+
+  const [
+    inspectionsRes,
+    sitesRes,
+    mediaRes,
+    tasksRes,
+    weedsRes,
+    personnelRes,
+  ] = await Promise.all([
+    supabase
+      .from('inspections')
+      .select('processing_status')
+      .order('date', { ascending: false, nullsFirst: false })
+      .limit(2000),
+    supabase
+      .from('sites')
+      .select('id', { count: 'exact', head: true }),
+    supabase
+      .from('inspection_media')
+      .select('id', { count: 'exact', head: true }),
+    supabase
+      .from('inspection_tasks')
+      .select('task_type')
+      .limit(5000),
+    supabase
+      .from('inspection_weeds')
+      .select('species_name_raw')
+      .limit(5000),
+    supabase
+      .from('inspection_personnel')
+      .select('hours_worked, staff(name)')
+      .limit(5000),
+  ])
+
+  for (const r of [inspectionsRes, tasksRes, weedsRes, personnelRes]) {
+    if (r.error) throw new Error(`Supabase query failed: ${r.error.message}`)
+  }
+  if (sitesRes.error) throw new Error(`sites count failed: ${sitesRes.error.message}`)
+  if (mediaRes.error) throw new Error(`media count failed: ${mediaRes.error.message}`)
+
+  const inspections = inspectionsRes.data ?? []
+  const tasks = tasksRes.data ?? []
+  const weeds = weedsRes.data ?? []
+  const personnel = personnelRes.data ?? []
+
+  const statusCounts = countBy(inspections, 'processing_status') as StatusCounts
+
+  const topTasks = topN(countBy(tasks, 'task_type'))
+  const topWeeds = topN(countBy(weeds, 'species_name_raw'))
+
+  const hoursByStaff: Record<string, number> = {}
+  for (const p of personnel as { hours_worked: number | string | null; staff: { name?: string } | { name?: string }[] | null }[]) {
+    const staffRow = Array.isArray(p.staff) ? p.staff[0] : p.staff
+    const name = staffRow?.name ?? 'Unknown'
+    const h = typeof p.hours_worked === 'number'
+      ? p.hours_worked
+      : parseFloat(p.hours_worked ?? '') || 0
+    hoursByStaff[name] = (hoursByStaff[name] ?? 0) + h
+  }
+  const topStaffHours: LabelValue[] = Object.entries(hoursByStaff)
+    .filter(([, h]) => h > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, TOP_N)
+    .map(([label, value]) => ({ label, value: Math.round(value) }))
+
+  return {
+    totalInspections: inspections.length,
+    statusCounts,
+    sitesTracked: sitesRes.count ?? 0,
+    photosCount: mediaRes.count ?? 0,
+    topTasks,
+    topWeeds,
+    topStaffHours,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E9: Clients / Sites / Zones queries ────────────────────────────
+
+type RawClient = {
+  id: string
+  name: string
+  long_name: string | null
+  contact_name: string | null
+  council_or_body: string | null
+  contact_email: string | null
+  contact_phone: string | null
+  report_frequency: string | null
+}
+
+type RawSite = {
+  id: string
+  client_id: string | null
+  parent_site_id: string | null
+  name: string
+  long_name: string | null
+  canonical_name: string | null
+  site_type: string | null
+  project_code: string | null
+}
+
+function compareByDisplayName(a: { longName: string | null; name: string }, b: { longName: string | null; name: string }): number {
+  const an = (a.longName || a.name).toLocaleLowerCase()
+  const bn = (b.longName || b.name).toLocaleLowerCase()
+  return an < bn ? -1 : an > bn ? 1 : 0
+}
+
+export async function getClientsListData(): Promise<ClientsListData> {
+  const supabase = await createClient()
+
+  const [clientsRes, sitesRes] = await Promise.all([
+    supabase
+      .from('clients')
+      .select('id,name,long_name,contact_name,council_or_body,contact_email,contact_phone,report_frequency'),
+    supabase
+      .from('sites')
+      .select('id,client_id,parent_site_id'),
+  ])
+
+  if (clientsRes.error) throw new Error(`clients query failed: ${clientsRes.error.message}`)
+  if (sitesRes.error) throw new Error(`sites query failed: ${sitesRes.error.message}`)
+
+  const rawClients = (clientsRes.data ?? []) as RawClient[]
+  const rawSites = (sitesRes.data ?? []) as Pick<RawSite, 'id' | 'client_id' | 'parent_site_id'>[]
+
+  const topLevelSitesByClient = new Map<string, string[]>()
+  const childCountByParent = new Map<string, number>()
+  for (const s of rawSites) {
+    if (s.parent_site_id) {
+      childCountByParent.set(s.parent_site_id, (childCountByParent.get(s.parent_site_id) ?? 0) + 1)
+    } else if (s.client_id) {
+      const arr = topLevelSitesByClient.get(s.client_id) ?? []
+      arr.push(s.id)
+      topLevelSitesByClient.set(s.client_id, arr)
+    }
+  }
+
+  const clients: ClientSummary[] = rawClients.map(c => {
+    const topLevelSiteIds = topLevelSitesByClient.get(c.id) ?? []
+    const zoneCount = topLevelSiteIds.reduce((acc, sid) => acc + (childCountByParent.get(sid) ?? 0), 0)
+    return {
+      id: c.id,
+      name: c.name,
+      longName: c.long_name,
+      contactName: c.contact_name,
+      councilOrBody: c.council_or_body,
+      reportFrequency: c.report_frequency,
+      siteCount: topLevelSiteIds.length,
+      zoneCount,
+    }
+  }).sort(compareByDisplayName)
+
+  return {
+    clients,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+export async function getClientDetailData(clientId: string): Promise<ClientDetailData | null> {
+  const supabase = await createClient()
+
+  const [clientRes, sitesRes] = await Promise.all([
+    supabase
+      .from('clients')
+      .select('id,name,long_name,contact_name,council_or_body,contact_email,contact_phone,report_frequency')
+      .eq('id', clientId)
+      .maybeSingle(),
+    supabase
+      .from('sites')
+      .select('id,client_id,parent_site_id,name,long_name')
+      .eq('client_id', clientId),
+  ])
+
+  if (clientRes.error) throw new Error(`client query failed: ${clientRes.error.message}`)
+  if (sitesRes.error) throw new Error(`sites query failed: ${sitesRes.error.message}`)
+  if (!clientRes.data) return null
+
+  const c = clientRes.data as RawClient
+  const allSites = (sitesRes.data ?? []) as Pick<RawSite, 'id' | 'parent_site_id' | 'name' | 'long_name'>[]
+
+  const childCountByParent = new Map<string, number>()
+  for (const s of allSites) {
+    if (s.parent_site_id) {
+      childCountByParent.set(s.parent_site_id, (childCountByParent.get(s.parent_site_id) ?? 0) + 1)
+    }
+  }
+
+  const sites: SiteSummary[] = allSites
+    .filter(s => !s.parent_site_id)
+    .map(s => ({
+      id: s.id,
+      name: s.name,
+      longName: s.long_name,
+      zoneCount: childCountByParent.get(s.id) ?? 0,
+    }))
+    .sort(compareByDisplayName)
+
+  return {
+    client: {
+      id: c.id,
+      name: c.name,
+      longName: c.long_name,
+      contactName: c.contact_name,
+      councilOrBody: c.council_or_body,
+      contactEmail: c.contact_email,
+      contactPhone: c.contact_phone,
+      reportFrequency: c.report_frequency,
+    },
+    sites,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+export async function getSiteDetailData(siteId: string): Promise<SiteDetailData | null> {
+  const supabase = await createClient()
+
+  const siteRes = await supabase
+    .from('sites')
+    .select('id,client_id,parent_site_id,name,long_name,canonical_name,site_type,project_code')
+    .eq('id', siteId)
+    .maybeSingle()
+
+  if (siteRes.error) throw new Error(`site query failed: ${siteRes.error.message}`)
+  if (!siteRes.data) return null
+
+  const s = siteRes.data as RawSite
+  if (!s.client_id) return null
+
+  const [clientRes, zonesRes] = await Promise.all([
+    supabase
+      .from('clients')
+      .select('id,name,long_name')
+      .eq('id', s.client_id)
+      .maybeSingle(),
+    supabase
+      .from('sites')
+      .select('id,name,long_name,canonical_name')
+      .eq('parent_site_id', siteId),
+  ])
+
+  if (clientRes.error) throw new Error(`client query failed: ${clientRes.error.message}`)
+  if (zonesRes.error) throw new Error(`zones query failed: ${zonesRes.error.message}`)
+
+  const zoneRows = (zonesRes.data ?? []) as Pick<RawSite, 'id' | 'name' | 'long_name' | 'canonical_name'>[]
+  const zoneIds = zoneRows.map(z => z.id)
+
+  let zones: ZoneRow[] = zoneRows.map(z => ({
+    id: z.id,
+    name: z.name,
+    longName: z.long_name,
+    canonicalName: z.canonical_name,
+    inspectionCount: 0,
+    lastInspectionDate: null,
+  }))
+
+  if (zoneIds.length > 0) {
+    const inspRes = await supabase
+      .from('inspections')
+      .select('site_id,date')
+      .in('site_id', zoneIds)
+    if (inspRes.error) throw new Error(`inspections query failed: ${inspRes.error.message}`)
+    const inspections = (inspRes.data ?? []) as { site_id: string; date: string | null }[]
+    const countByZone = new Map<string, number>()
+    const latestByZone = new Map<string, string>()
+    for (const i of inspections) {
+      countByZone.set(i.site_id, (countByZone.get(i.site_id) ?? 0) + 1)
+      if (i.date) {
+        const prev = latestByZone.get(i.site_id)
+        if (!prev || i.date > prev) latestByZone.set(i.site_id, i.date)
+      }
+    }
+    zones = zones.map(z => ({
+      ...z,
+      inspectionCount: countByZone.get(z.id) ?? 0,
+      lastInspectionDate: latestByZone.get(z.id) ?? null,
+    }))
+  }
+
+  zones.sort(compareByDisplayName)
+
+  const clientRow = clientRes.data as Pick<RawClient, 'id' | 'name' | 'long_name'> | null
+
+  return {
+    site: {
+      id: s.id,
+      clientId: s.client_id,
+      name: s.name,
+      longName: s.long_name,
+      siteType: s.site_type,
+      projectCode: s.project_code,
+    },
+    clientName: clientRow?.name ?? 'Unknown client',
+    clientLongName: clientRow?.long_name ?? null,
+    zones,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E10: Reports list + viewer ─────────────────────────────────────
+
+type RawReport = {
+  id: string
+  title: string | null
+  status: ReportStatus
+  report_period_start: string | null
+  report_period_end: string | null
+  pdf_url: string | null
+  docx_url: string | null
+  created_at: string
+  client_id: string | null
+  site_id: string | null
+  clients: { name?: string | null; long_name?: string | null } | { name?: string | null; long_name?: string | null }[] | null
+  sites: { name?: string | null } | { name?: string | null }[] | null
+}
+
+export async function getReportsListData(
+  params: { scope: ReportScope | null; id: string | null },
+): Promise<ReportsListData> {
+  const supabase = await createClient()
+  const { scope, id } = params
+
+  let query = supabase
+    .from('client_reports')
+    .select(
+      'id,title,status,report_period_start,report_period_end,pdf_url,docx_url,created_at,client_id,site_id,clients(name,long_name),sites(name)',
+    )
+    .order('created_at', { ascending: false })
+    .limit(100)
+
+  if (scope === 'client' && id) {
+    query = query.eq('client_id', id)
+  } else if ((scope === 'site' || scope === 'zone') && id) {
+    query = query.eq('site_id', id)
+  }
+
+  const reportsRes = await query
+  if (reportsRes.error) throw new Error(`reports query failed: ${reportsRes.error.message}`)
+
+  const rows = (reportsRes.data ?? []) as RawReport[]
+
+  const reports: ReportListItem[] = rows.map(r => {
+    const client = Array.isArray(r.clients) ? r.clients[0] : r.clients
+    const site = Array.isArray(r.sites) ? r.sites[0] : r.sites
+    return {
+      id: r.id,
+      title: r.title,
+      clientName: client?.long_name || client?.name || null,
+      siteName: site?.name ?? null,
+      status: r.status,
+      reportPeriodStart: r.report_period_start,
+      reportPeriodEnd: r.report_period_end,
+      pdfUrl: r.pdf_url,
+      docxUrl: r.docx_url,
+      createdAt: r.created_at,
+    }
+  })
+
+  let scopeContext: ScopeContext = { scope: null, id: null, displayName: null }
+  if (scope && id) {
+    if (scope === 'client') {
+      const c = await supabase
+        .from('clients')
+        .select('name,long_name')
+        .eq('id', id)
+        .maybeSingle()
+      const row = c.data as { name?: string | null; long_name?: string | null } | null
+      scopeContext = {
+        scope,
+        id,
+        displayName: row?.long_name || row?.name || 'Unknown client',
+      }
+    } else {
+      const s = await supabase
+        .from('sites')
+        .select('name,long_name')
+        .eq('id', id)
+        .maybeSingle()
+      const row = s.data as { name?: string | null; long_name?: string | null } | null
+      scopeContext = {
+        scope,
+        id,
+        displayName: row?.long_name || row?.name || `Unknown ${scope}`,
+      }
+    }
+  }
+
+  const totals = {
+    total: reports.length,
+    drafts: reports.filter(r => r.status === 'draft').length,
+    review: reports.filter(r => r.status === 'review').length,
+    approved: reports.filter(r => r.status === 'approved' || r.status === 'sent').length,
+  }
+
+  return {
+    reports,
+    scopeContext,
+    totals,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E10b: Report detail (preview + edit) ──────────────────────────
+
+type RawReportDetail = {
+  id: string
+  client_id: string | null
+  title: string | null
+  status: ReportStatus
+  report_period_start: string | null
+  report_period_end: string | null
+  pdf_url: string | null
+  docx_url: string | null
+  html_content: string | null
+  period_map_images: string[] | null
+  created_at: string
+  clients: { name?: string | null; long_name?: string | null; location_maps?: string[] | null } | { name?: string | null; long_name?: string | null; location_maps?: string[] | null }[] | null
+  sites: { name?: string | null } | { name?: string | null }[] | null
+}
+
+export async function getReportDetail(id: string): Promise<ReportDetail | null> {
+  const supabase = await createClient()
+  const res = await supabase
+    .from('client_reports')
+    .select(
+      'id,client_id,title,status,report_period_start,report_period_end,pdf_url,docx_url,html_content,period_map_images,created_at,clients(name,long_name,location_maps),sites(name)',
+    )
+    .eq('id', id)
+    .maybeSingle()
+
+  if (res.error) throw new Error(`report detail query failed: ${res.error.message}`)
+  if (!res.data) return null
+
+  const r = res.data as RawReportDetail
+  const client = Array.isArray(r.clients) ? r.clients[0] : r.clients
+  const site = Array.isArray(r.sites) ? r.sites[0] : r.sites
+
+  return {
+    id: r.id,
+    clientId: r.client_id,
+    title: r.title,
+    status: r.status,
+    reportPeriodStart: r.report_period_start,
+    reportPeriodEnd: r.report_period_end,
+    pdfUrl: r.pdf_url,
+    docxUrl: r.docx_url,
+    htmlContent: r.html_content,
+    periodMapImages: Array.isArray(r.period_map_images) ? r.period_map_images : null,
+    clientName: client?.name ?? null,
+    clientLongName: client?.long_name ?? null,
+    siteName: site?.name ?? null,
+    locationMaps: Array.isArray(client?.location_maps) ? client?.location_maps ?? null : null,
+    createdAt: r.created_at,
+  }
+}
+
+// ─── E13: Operations — Staff & Hours ────────────────────────────────
+
+type RawStaff = { id: string; name: string; role: string | null; active: boolean | null }
+type RawPersonnel = {
+  staff_id: string | null
+  hours_worked: number | string | null
+  staff: { name?: string | null } | { name?: string | null }[] | null
+}
+
+function pickEmbedded<T>(v: T | T[] | null | undefined): T | null {
+  return Array.isArray(v) ? (v[0] ?? null) : (v ?? null)
+}
+
+export async function getStaffData(): Promise<StaffData> {
+  const supabase = await createClient()
+
+  const [staffRes, personnelRes] = await Promise.all([
+    supabase
+      .from('staff')
+      .select('id,name,role,active')
+      .order('name'),
+    supabase
+      .from('inspection_personnel')
+      .select('staff_id,staff(name),hours_worked')
+      .limit(5000),
+  ])
+
+  if (staffRes.error) throw new Error(`staff query failed: ${staffRes.error.message}`)
+  if (personnelRes.error) throw new Error(`inspection_personnel query failed: ${personnelRes.error.message}`)
+
+  const staff = (staffRes.data ?? []) as RawStaff[]
+  const personnel = (personnelRes.data ?? []) as RawPersonnel[]
+
+  const hoursByName: Record<string, number> = {}
+  const inspectionsByName: Record<string, number> = {}
+  for (const p of personnel) {
+    const embedded = pickEmbedded(p.staff)
+    const name = embedded?.name ?? 'Unknown'
+    const h = typeof p.hours_worked === 'number'
+      ? p.hours_worked
+      : parseFloat(p.hours_worked ?? '') || 0
+    hoursByName[name] = (hoursByName[name] ?? 0) + h
+    inspectionsByName[name] = (inspectionsByName[name] ?? 0) + 1
+  }
+
+  const totalHours = Object.values(hoursByName).reduce((s, h) => s + h, 0)
+  const activeStaff = staff.filter(s => s.active !== false).length
+
+  const sortedHours = Object.entries(hoursByName).sort((a, b) => b[1] - a[1])
+  const topPerformerName = sortedHours[0]?.[0] ?? null
+  const topPerformerHours = sortedHours[0] ? Math.round(sortedHours[0][1]) : 0
+
+  const hoursByStaff: LabelValue[] = sortedHours
+    .filter(([, h]) => h > 0)
+    .map(([label, value]) => ({ label, value: Math.round(value) }))
+
+  const roster: StaffRosterRow[] = staff.map(s => ({
+    id: s.id,
+    name: s.name,
+    role: s.role,
+    active: s.active !== false,
+    inspectionCount: inspectionsByName[s.name] ?? 0,
+    totalHours: Math.round(hoursByName[s.name] ?? 0),
+  }))
+
+  return {
+    totalStaff: staff.length,
+    activeStaff,
+    totalHours: Math.round(totalHours),
+    topPerformerName,
+    topPerformerHours,
+    hoursByStaff,
+    roster,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E13: Operations — Chemicals ────────────────────────────────────
+
+type RawInspectionChemical = { chemical_name_raw: string | null }
+type RawCarRecord = {
+  id: string
+  date: string | null
+  application_method: string | null
+  weather_general: string | null
+  sites: { name?: string | null } | { name?: string | null }[] | null
+}
+type RawChemicalLookup = { canonical_name: string; type: string | null; active_ingredient: string | null }
+
+export async function getChemicalsData(): Promise<ChemicalsData> {
+  const supabase = await createClient()
+
+  const [chemicalsRes, carRes, lookupRes] = await Promise.all([
+    supabase
+      .from('inspection_chemicals')
+      .select('chemical_name_raw')
+      .limit(5000),
+    supabase
+      .from('chemical_application_records')
+      .select('id,date,application_method,total_amount_sprayed_litres,weather_general,sites(name)')
+      .order('date', { ascending: false, nullsFirst: false })
+      .limit(500),
+    supabase
+      .from('chemical_lookup')
+      .select('canonical_name,type,active_ingredient')
+      .order('canonical_name'),
+  ])
+
+  if (chemicalsRes.error) throw new Error(`inspection_chemicals query failed: ${chemicalsRes.error.message}`)
+  if (carRes.error) throw new Error(`chemical_application_records query failed: ${carRes.error.message}`)
+  if (lookupRes.error) throw new Error(`chemical_lookup query failed: ${lookupRes.error.message}`)
+
+  const chemicals = (chemicalsRes.data ?? []) as RawInspectionChemical[]
+  const carRecords = (carRes.data ?? []) as RawCarRecord[]
+  const lookup = (lookupRes.data ?? []) as RawChemicalLookup[]
+
+  const counts = countBy(chemicals as unknown as Record<string, unknown>[], 'chemical_name_raw')
+  const top = topN(counts, 10)
+  const usageBars: LabelValue[] = top.map(t => ({ label: t.label, value: t.value }))
+
+  const recentApplications: ChemicalApplicationRecordRow[] = carRecords.slice(0, 6).map(r => {
+    const site = pickEmbedded(r.sites)
+    return {
+      id: r.id,
+      date: r.date,
+      siteName: site?.name ?? null,
+      applicationMethod: r.application_method,
+      weatherGeneral: r.weather_general,
+    }
+  })
+
+  const reference: ChemicalLookupCard[] = lookup.map(c => ({
+    canonicalName: c.canonical_name,
+    type: c.type,
+    activeIngredient: c.active_ingredient,
+    mentions: counts[c.canonical_name] ?? 0,
+  }))
+
+  const mostUsedName = top[0]?.label ?? null
+  const mostUsedMentions = top[0]?.value ?? 0
+
+  return {
+    chemicalRecords: chemicals.length,
+    uniqueChemicals: Object.keys(counts).length,
+    applicationRecords: carRecords.length,
+    mostUsedName,
+    mostUsedMentions,
+    usageBars,
+    recentApplications,
+    reference,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E13: Operations — Species ──────────────────────────────────────
+
+type RawInspectionWeed = { species_name_raw: string | null }
+type RawSpeciesLookup = {
+  canonical_name: string
+  scientific_name: string | null
+  species_type: string | null
+  category: string | null
+}
+
+export async function getSpeciesData(): Promise<SpeciesData> {
+  const supabase = await createClient()
+
+  const [weedsRes, lookupRes] = await Promise.all([
+    supabase
+      .from('inspection_weeds')
+      .select('species_name_raw')
+      .limit(5000),
+    supabase
+      .from('species_lookup')
+      .select('canonical_name,scientific_name,species_type,category')
+      .order('canonical_name'),
+  ])
+
+  if (weedsRes.error) throw new Error(`inspection_weeds query failed: ${weedsRes.error.message}`)
+  if (lookupRes.error) throw new Error(`species_lookup query failed: ${lookupRes.error.message}`)
+
+  const weeds = (weedsRes.data ?? []) as RawInspectionWeed[]
+  const lookup = (lookupRes.data ?? []) as RawSpeciesLookup[]
+
+  const counts = countBy(weeds as unknown as Record<string, unknown>[], 'species_name_raw')
+  const top = topN(counts, 15)
+  const frequencyBars: LabelValue[] = top.map(t => ({ label: t.label, value: t.value }))
+
+  const cards: SpeciesLookupCard[] = lookup.slice(0, 12).map(s => ({
+    canonicalName: s.canonical_name,
+    scientificName: s.scientific_name,
+    speciesType: s.species_type,
+    category: s.category,
+    sightings: counts[s.canonical_name] ?? 0,
+  }))
+
+  return {
+    totalSightings: weeds.length,
+    uniqueSpecies: Object.keys(counts).length,
+    referenceCount: lookup.length,
+    mostCommonName: top[0]?.label ?? null,
+    mostCommonSightings: top[0]?.value ?? 0,
+    frequencyBars,
+    cards,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E11: Inspections list ──────────────────────────────────────────
+
+const INSPECTION_LIST_LIMIT = 2000
+const INSPECTION_TABLE_ROWS = 50
+const INSPECTION_AGG_LIMIT = 5000
+
+const KNOWN_PROCESSING_STATUSES: ReadonlySet<ProcessingStatus> = new Set([
+  'completed', 'needs_review', 'failed', 'processing', 'pending', 'unknown',
+])
+
+function asProcessingStatus(s: string | null | undefined): ProcessingStatus {
+  if (!s) return 'unknown'
+  return KNOWN_PROCESSING_STATUSES.has(s as ProcessingStatus) ? (s as ProcessingStatus) : 'unknown'
+}
+
+function flattenEmbedded<T>(v: T | T[] | null | undefined): T | null {
+  if (Array.isArray(v)) return v[0] ?? null
+  return v ?? null
+}
+
+export async function getInspectionsListData(): Promise<InspectionsListData> {
+  const supabase = await createClient()
+
+  const [inspectionsRes, tasksRes, weedsRes, mediaRes] = await Promise.all([
+    supabase
+      .from('inspections')
+      .select('id, date, site_id, supervisor_id, sc_template_type, processing_status, sites(name), staff(name)')
+      .order('date', { ascending: false, nullsFirst: false })
+      .limit(INSPECTION_LIST_LIMIT),
+    supabase.from('inspection_tasks').select('inspection_id').limit(INSPECTION_AGG_LIMIT),
+    supabase.from('inspection_weeds').select('inspection_id').limit(INSPECTION_AGG_LIMIT),
+    supabase.from('inspection_media').select('inspection_id').limit(INSPECTION_AGG_LIMIT),
+  ])
+
+  if (inspectionsRes.error) throw new Error(`inspections query failed: ${inspectionsRes.error.message}`)
+  if (tasksRes.error) throw new Error(`inspection_tasks query failed: ${tasksRes.error.message}`)
+  if (weedsRes.error) throw new Error(`inspection_weeds query failed: ${weedsRes.error.message}`)
+  if (mediaRes.error) throw new Error(`inspection_media query failed: ${mediaRes.error.message}`)
+
+  type RawInspection = {
+    id: string
+    date: string | null
+    site_id: string | null
+    supervisor_id: string | null
+    sc_template_type: string
+    processing_status: string | null
+    sites: { name?: string | null } | { name?: string | null }[] | null
+    staff: { name?: string | null } | { name?: string | null }[] | null
+  }
+  type RawAgg = { inspection_id: string | null }
+
+  const inspections = (inspectionsRes.data ?? []) as RawInspection[]
+  const tasks = (tasksRes.data ?? []) as RawAgg[]
+  const weeds = (weedsRes.data ?? []) as RawAgg[]
+  const media = (mediaRes.data ?? []) as RawAgg[]
+
+  const taskCounts = new Map<string, number>()
+  for (const t of tasks) {
+    if (!t.inspection_id) continue
+    taskCounts.set(t.inspection_id, (taskCounts.get(t.inspection_id) ?? 0) + 1)
+  }
+  const weedCounts = new Map<string, number>()
+  for (const w of weeds) {
+    if (!w.inspection_id) continue
+    weedCounts.set(w.inspection_id, (weedCounts.get(w.inspection_id) ?? 0) + 1)
+  }
+  const photoCounts = new Map<string, number>()
+  for (const m of media) {
+    if (!m.inspection_id) continue
+    photoCounts.set(m.inspection_id, (photoCounts.get(m.inspection_id) ?? 0) + 1)
+  }
+
+  const rows: InspectionRow[] = inspections.slice(0, INSPECTION_TABLE_ROWS).map(i => {
+    const site = flattenEmbedded(i.sites)
+    const supervisor = flattenEmbedded(i.staff)
+    return {
+      id: i.id,
+      date: i.date,
+      siteName: site?.name ?? null,
+      templateType: i.sc_template_type as InspectionTemplateType,
+      supervisorName: supervisor?.name ?? null,
+      taskCount: taskCounts.get(i.id) ?? 0,
+      weedCount: weedCounts.get(i.id) ?? 0,
+      photoCount: photoCounts.get(i.id) ?? 0,
+      status: asProcessingStatus(i.processing_status),
+    }
+  })
+
+  let dailyWorkReports = 0
+  let chemicalRecords = 0
+  let failed = 0
+  for (const i of inspections) {
+    if (i.sc_template_type === 'daily_work_report') dailyWorkReports++
+    else if (i.sc_template_type === 'chemical_application_record') chemicalRecords++
+    if (i.processing_status === 'failed') failed++
+  }
+
+  return {
+    rows,
+    totals: {
+      total: inspections.length,
+      dailyWorkReports,
+      chemicalRecords,
+      failed,
+    },
+    shown: rows.length,
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E14: Global Sites view ─────────────────────────────────────────
+
+const SITES_GLOBAL_INSPECTIONS_LIMIT = 5000
+const SITES_GLOBAL_PERSONNEL_LIMIT = 10000
+
+export async function getSitesGlobalData(): Promise<SitesGlobalData> {
+  const supabase = await createClient()
+
+  const [sitesRes, inspectionsRes, personnelRes] = await Promise.all([
+    supabase
+      .from('sites')
+      .select('id,name,site_type,project_code'),
+    supabase
+      .from('inspections')
+      .select('id,site_id')
+      .limit(SITES_GLOBAL_INSPECTIONS_LIMIT),
+    supabase
+      .from('inspection_personnel')
+      .select('inspection_id,hours_worked')
+      .limit(SITES_GLOBAL_PERSONNEL_LIMIT),
+  ])
+
+  if (sitesRes.error) throw new Error(`sites query failed: ${sitesRes.error.message}`)
+  if (inspectionsRes.error) throw new Error(`inspections query failed: ${inspectionsRes.error.message}`)
+  if (personnelRes.error) throw new Error(`inspection_personnel query failed: ${personnelRes.error.message}`)
+
+  type RawSiteRow = { id: string; name: string; site_type: string | null; project_code: string | null }
+  type RawInspectionRef = { id: string; site_id: string | null }
+  type RawPersonnelRef = { inspection_id: string | null; hours_worked: number | string | null }
+
+  const rawSites = (sitesRes.data ?? []) as RawSiteRow[]
+  const rawInspections = (inspectionsRes.data ?? []) as RawInspectionRef[]
+  const rawPersonnel = (personnelRes.data ?? []) as RawPersonnelRef[]
+
+  const inspectionToSite = new Map<string, string>()
+  const inspectionCountBySite = new Map<string, number>()
+  for (const i of rawInspections) {
+    if (!i.site_id) continue
+    inspectionToSite.set(i.id, i.site_id)
+    inspectionCountBySite.set(i.site_id, (inspectionCountBySite.get(i.site_id) ?? 0) + 1)
+  }
+
+  const hoursBySite = new Map<string, number>()
+  for (const p of rawPersonnel) {
+    if (!p.inspection_id) continue
+    const siteId = inspectionToSite.get(p.inspection_id)
+    if (!siteId) continue
+    const h = typeof p.hours_worked === 'number'
+      ? p.hours_worked
+      : parseFloat(p.hours_worked ?? '') || 0
+    hoursBySite.set(siteId, (hoursBySite.get(siteId) ?? 0) + h)
+  }
+
+  const sites: SiteWithStats[] = rawSites
+    .map(s => ({
+      id: s.id,
+      name: s.name,
+      siteType: s.site_type,
+      projectCode: s.project_code,
+      inspectionCount: inspectionCountBySite.get(s.id) ?? 0,
+      hours: Math.round(hoursBySite.get(s.id) ?? 0),
+    }))
+    .sort((a, b) => b.inspectionCount - a.inspectionCount)
+
+  const sitesWithInspections = sites.filter(s => s.inspectionCount > 0).length
+  const mostActive = sites[0] && sites[0].inspectionCount > 0 ? sites[0] : null
+  const totalHours = Array.from(hoursBySite.values()).reduce((s, h) => s + h, 0)
+
+  return {
+    sites,
+    totalSites: sites.length,
+    sitesWithInspections,
+    mostActiveName: mostActive?.name ?? null,
+    mostActiveCount: mostActive?.inspectionCount ?? 0,
+    totalHours: Math.round(totalHours),
+    generatedAt: new Date().toISOString(),
+  }
+}
+
+// ─── E12: Pipeline Health ───────────────────────────────────────────
+
+const PIPELINE_INSPECTIONS_LIMIT = 2000
+const PIPELINE_ISSUES_LIMIT = 20
+
+type RawPipelineInspection = {
+  id: string
+  sc_audit_id: string | null
+  date: string | null
+  sc_template_type: string
+  processing_status: string | null
+}
+
+type RawSyncStateRow = {
+  sync_type: string | null
+  last_sync_at: string | null
+  last_modified_after: string | null
+  high_water_mark: string | null
+  last_cursor: string | null
+  total_synced: number | null
+  last_error: string | null
+}
+
+function templateLabel(t: string): string {
+  if (t === 'daily_work_report') return 'Daily Work Report'
+  if (t === 'chemical_application_record') return 'Chemical Application'
+  return t
+}
+
+export async function getPipelineHealthData(): Promise<PipelineHealthData> {
+  const supabase = await createClient()
+
+  const [inspectionsRes, syncStateRes] = await Promise.all([
+    supabase
+      .from('inspections')
+      .select('id, sc_audit_id, date, sc_template_type, processing_status')
+      .order('date', { ascending: false, nullsFirst: false })
+      .limit(PIPELINE_INSPECTIONS_LIMIT),
+    supabase
+      .from('sync_state')
+      .select('sync_type,last_sync_at,last_modified_after,high_water_mark,last_cursor,total_synced,last_error')
+      .limit(1),
+  ])
+
+  if (inspectionsRes.error) throw new Error(`pipeline inspections query failed: ${inspectionsRes.error.message}`)
+  if (syncStateRes.error) throw new Error(`sync_state query failed: ${syncStateRes.error.message}`)
+
+  const inspections = (inspectionsRes.data ?? []) as RawPipelineInspection[]
+
+  const statusCounts = countBy(
+    inspections as unknown as Record<string, unknown>[],
+    'processing_status',
+  ) as StatusCounts
+
+  const templateCounts = countBy(
+    inspections as unknown as Record<string, unknown>[],
+    'sc_template_type',
+  )
+  const templateBars: LabelValue[] = Object.entries(templateCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, value]) => ({ label: templateLabel(label), value }))
+
+  const issues: PipelineIssueRow[] = inspections
+    .filter(i => i.processing_status === 'failed' || i.processing_status === 'needs_review')
+    .slice(0, PIPELINE_ISSUES_LIMIT)
+    .map(i => ({
+      id: i.id,
+      auditId: i.sc_audit_id,
+      date: i.date,
+      templateType: i.sc_template_type as InspectionTemplateType,
+      status: (i.processing_status as ProcessingStatus) ?? 'unknown',
+    }))
+
+  const syncRow = (syncStateRes.data ?? [])[0] as RawSyncStateRow | undefined
+  const syncState: SyncState | null = syncRow
+    ? {
+        syncType: syncRow.sync_type,
+        lastSyncAt: syncRow.last_sync_at,
+        lastModifiedAfter: syncRow.last_modified_after,
+        highWaterMark: syncRow.high_water_mark,
+        lastCursor: syncRow.last_cursor,
+        totalSynced: syncRow.total_synced ?? 0,
+        lastError: syncRow.last_error,
+      }
+    : null
+
+  return {
+    totalInspections: inspections.length,
+    statusCounts,
+    templateBars,
+    issues,
+    syncState,
+    generatedAt: new Date().toISOString(),
+  }
+}

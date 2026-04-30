@@ -406,3 +406,125 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { filter: opacity(0.
 /* ── Leaflet ───────────────────────────────────────────────── */
 @keyframes pulse { 0% { transform: scale(1); opacity: 0.6; } 50% { transform: scale(1.8); opacity: 0; } 100% { transform: scale(1); opacity: 0; } }
 .leaflet-container { background: var(--bg-sunken) !important; }
+
+/* ── Reporting (E8: Pipeline Dashboard primitives) ─────────── */
+.kpi-sub { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+
+.alert-bar {
+  background: oklch(0.62 0.12 55 / 0.08); border-left: 3px solid var(--warn);
+  border-radius: var(--radius-lg); padding: 14px 20px; margin-bottom: 24px;
+  display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2);
+}
+
+.bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.bar-label {
+  width: 140px; font-size: 12px; color: var(--ink-2);
+  text-align: right; flex-shrink: 0; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.bar-track { flex: 1; height: 6px; background: var(--bg-sunken); border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.8s ease; }
+.bar-fill.clay, .bar-fill.amber, .bar-fill.caramel { background: var(--accent); }
+.bar-fill.sage { background: var(--ok); }
+.bar-fill.steel { background: var(--ink-3); }
+.bar-fill.stone { background: var(--ink-4); }
+.bar-fill.terracotta { background: var(--danger); }
+.bar-count {
+  width: 50px; font-family: var(--font-mono), monospace; font-size: 12px; font-weight: 500;
+  font-variant-numeric: tabular-nums; color: var(--ink);
+}
+
+.donut-container { display: flex; align-items: center; gap: 24px; }
+.donut { width: 120px; height: 120px; border-radius: 50%; position: relative; flex-shrink: 0; }
+.donut-center {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 80px; height: 80px; background: var(--bg-elev); border-radius: 50%;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+}
+.donut-center .value {
+  font-family: var(--font-display), sans-serif; font-size: 24px; font-weight: 400;
+  font-variant-numeric: tabular-nums; color: var(--ink); letter-spacing: -0.02em;
+}
+.donut-center .label {
+  font-family: var(--font-mono), monospace; font-size: 9px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--ink-3);
+}
+.donut-legend { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.legend-count {
+  font-family: var(--font-mono), monospace; font-weight: 500; font-variant-numeric: tabular-nums;
+  margin-left: auto; color: var(--ink); min-width: 36px; text-align: right;
+}
+
+/* ── Reporting (E13: Operations card grids) ────────────────── */
+.three-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.chem-card, .species-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.chem-card:hover, .species-card:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.chem-card { padding: 18px 22px; }
+.chem-name {
+  font-size: 15px; font-weight: 500; letter-spacing: -0.01em; margin-bottom: 2px;
+}
+.chem-type {
+  font-family: var(--font-mono), monospace; font-size: 11px;
+  color: var(--ink-3); letter-spacing: 0.04em; text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.chem-stat-row { display: flex; gap: 24px; }
+.chem-stat-val {
+  font-family: var(--font-display), sans-serif; font-size: 18px; font-weight: 400;
+  font-variant-numeric: tabular-nums; color: var(--ink); letter-spacing: -0.01em;
+}
+.chem-stat-lbl {
+  font-family: var(--font-mono), monospace; font-size: 10px; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px;
+}
+
+.species-card {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px; gap: 12px;
+}
+.species-info { flex: 1; min-width: 0; }
+.species-name { font-size: 14px; font-weight: 500; letter-spacing: -0.01em; }
+.species-sci { font-size: 12px; color: var(--ink-3); font-style: italic; }
+.species-count {
+  font-family: var(--font-display), sans-serif; font-size: 22px; font-weight: 400;
+  font-variant-numeric: tabular-nums; color: var(--accent); letter-spacing: -0.01em;
+  text-align: right;
+}
+.species-count-label {
+  font-family: var(--font-mono), monospace; font-size: 10px; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.05em; text-align: right;
+}
+
+.empty-state { text-align: center; padding: 48px 20px; color: var(--ink-3); }
+.empty-state .icon { font-size: 36px; margin-bottom: 12px; opacity: 0.4; }
+.empty-state .msg { font-size: 14px; }
+
+.car-record {
+  background: var(--bg-sunken);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+.car-record:last-child { margin-bottom: 0; }
+.car-record-site { font-weight: 500; font-size: 13px; }
+.car-record-meta {
+  font-family: var(--font-mono), monospace; font-size: 11px;
+  color: var(--ink-3); margin-top: 4px; letter-spacing: 0.02em;
+}
